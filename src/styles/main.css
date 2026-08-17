@@ -1,6 +1,6 @@
 :root {
   --bg: #0c0d10;
-  --bg-elevated: #16181d;
+  --bg-elevated: #16181dcf;
   --line: #2a2d36;
   --text: #e8e6e1;
   --muted: #9a978f;
@@ -183,14 +183,65 @@ h3 {
 }
 
 .hero {
+  position: relative;
+  isolation: isolate;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 30rem) 1fr;
   min-height: calc(100dvh - var(--header-h));
-  max-width: var(--max);
-  margin: 0 auto;
-  padding: var(--space);
-  gap: var(--space);
-  align-items: center;
+  max-width: none;
+  margin: 0;
+  padding: var(--space) max(var(--space), calc((100% - var(--max)) / 2))
+    var(--space) 0.55rem;
+  align-items: end;
+  overflow: hidden;
+}
+
+.hero-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 22%;
+  pointer-events: none;
+}
+
+.hero-fade {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      to bottom,
+      transparent 42%,
+      rgb(12 13 16 / 0.45) 72%,
+      var(--bg) 100%
+    ),
+    linear-gradient(
+      to right,
+      rgb(12 13 16 / 0.55) 0%,
+      rgb(12 13 16 / 0.18) 42%,
+      transparent 70%
+    );
+}
+
+.hero-copy {
+  position: relative;
+  z-index: 3;
+  padding: 0 0 1.5rem;
+  max-width: 30rem;
+}
+
+.hero-copy h1,
+.hero-copy .lede,
+.hero-copy .hero-summary {
+  text-shadow: 0 2px 18px rgb(0 0 0 / 0.55);
+}
+
+.hero-copy .hero-summary {
+  color: #d8d4cc;
 }
 
 .eyebrow {
@@ -252,31 +303,25 @@ h3 {
   border-color: var(--accent);
 }
 
-.hero-stage {
-  position: relative;
-  min-height: min(70dvh, 32rem);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background:
-    radial-gradient(circle at 30% 20%, #1e222c 0%, transparent 50%),
-    var(--bg-elevated);
-  overflow: hidden;
-}
-
-#hero-canvas {
+#dust-canvas {
   width: 100%;
   height: 100%;
   position: absolute;
   inset: 0;
-  touch-action: none;
-  cursor: grab;
+  z-index: 0;
+  pointer-events: none;
 }
 
-.hero-fallback {
+.page-body {
+  position: relative;
+  isolation: isolate;
+  background: var(--bg);
+}
+
+.page-body .section,
+.page-body .site-footer {
   position: relative;
   z-index: 1;
-  padding: 1.5rem;
-  color: var(--muted);
 }
 
 .section {
@@ -285,17 +330,7 @@ h3 {
   padding: clamp(3rem, 8vw, 5.5rem) var(--space);
 }
 
-.about-grid {
-  display: grid;
-  grid-template-columns: 1.4fr 1fr;
-  gap: 1.5rem;
-}
-
-.about-text {
-  color: var(--muted);
-  margin: 0;
-}
-
+.about-card,
 .edu-card,
 .featured-card,
 .timeline li,
@@ -304,6 +339,47 @@ h3 {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 1.25rem 1.4rem;
+}
+
+.about-text {
+  color: var(--muted);
+  margin: 0;
+}
+
+.job-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 0.35rem;
+}
+
+.job-head h3 {
+  margin-bottom: 0.35rem;
+}
+
+.job-logo {
+  width: min(10.5rem, 42%);
+  height: auto;
+  max-height: 3.4rem;
+  object-fit: contain;
+  object-position: right center;
+  flex-shrink: 0;
+  border-radius: 8px;
+}
+
+.inline-logo {
+  height: 1.35rem;
+  width: auto;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.featured-play {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin: 0.9rem 0 0;
 }
 
 .edu-gpa {
@@ -425,18 +501,22 @@ h3 {
   }
 
   .hero,
-  .about-grid,
   .skills-grid {
     grid-template-columns: 1fr;
   }
 
-  .hero {
-    min-height: auto;
-    padding-top: 2rem;
+  .job-head {
+    flex-direction: column-reverse;
+    align-items: flex-start;
   }
 
-  .hero-stage {
-    min-height: 18rem;
-    order: -1;
+  .job-logo {
+    object-position: left center;
+    max-height: 2.8rem;
+  }
+
+  .hero {
+    min-height: calc(100dvh - var(--header-h));
+    align-items: end;
   }
 }

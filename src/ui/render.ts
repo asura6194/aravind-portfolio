@@ -2,8 +2,10 @@ import {
   education,
   experience,
   featured,
+  GAME_URL,
   profile,
   skills,
+  type JobPoint,
 } from "../content";
 
 export function renderPage(): void {
@@ -29,10 +31,15 @@ export function renderPage(): void {
       .map(
         (job) => `
         <li>
-          <h3>${escapeHtml(job.role)}</h3>
-          <p class="job-meta">${escapeHtml(job.company)} · ${escapeHtml(job.period)} · ${escapeHtml(job.location)}</p>
+          <div class="job-head">
+            <div>
+              <h3>${escapeHtml(job.role)}</h3>
+              <p class="job-meta">${escapeHtml(job.company)} · ${escapeHtml(job.period)} · ${escapeHtml(job.location)}</p>
+            </div>
+            <img class="job-logo" src="${escapeHtml(job.logo)}" alt="${escapeHtml(job.logoAlt)}" />
+          </div>
           <ul>
-            ${job.points.map((point) => `<li>${escapeHtml(point)}</li>`).join("")}
+            ${job.points.map((point) => renderPoint(point)).join("")}
           </ul>
         </li>`,
       )
@@ -54,15 +61,6 @@ export function renderPage(): void {
       .join("");
   }
 
-  const featuredRoot = document.querySelector("[data-featured]");
-  if (featuredRoot) {
-    featuredRoot.innerHTML = `
-      <p class="eyebrow">${featured.tags.map(escapeHtml).join(" · ")}</p>
-      <h3>${escapeHtml(featured.title)}</h3>
-      <p>${escapeHtml(featured.description)}</p>
-    `;
-  }
-
   const contact = document.querySelector("[data-contact]");
   if (contact) {
     contact.innerHTML = `
@@ -72,6 +70,13 @@ export function renderPage(): void {
       <li><a href="/Aravind.pdf" download>Download resume (PDF)</a></li>
     `;
   }
+}
+
+function renderPoint(point: JobPoint): string {
+  if (!point.href) {
+    return `<li>${escapeHtml(point.text)}</li>`;
+  }
+  return `<li>${escapeHtml(point.text)} <a href="${escapeHtml(point.href)}" target="_blank" rel="noreferrer">${escapeHtml(point.hrefLabel ?? point.href)}</a></li>`;
 }
 
 function setText(selector: string, value: string): void {

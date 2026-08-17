@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Aravind R — Full Stack Web Developer in Bengaluru. Web apps, APIs, and 3D experiences."
+    />
+    <title>Aravind R — Full Stack Web Developer</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Syne:wght@500;700;800&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <a class="logo" href="#hero">AR</a>
+      <button
+        class="nav-toggle"
+        type="button"
+        aria-expanded="false"
+        aria-controls="site-nav"
+      >
+        <span class="nav-toggle-bar"></span>
+        <span class="sr-only">Menu</span>
+      </button>
+      <nav id="site-nav" class="site-nav" aria-label="Primary">
+        <a href="#about">About</a>
+        <a href="#experience">Experience</a>
+        <a href="#skills">Skills</a>
+        <a href="#featured">Work</a>
+        <a href="#contact">Contact</a>
+        <a href="#education">Education</a>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section id="hero" class="hero">
+        <img
+          class="hero-bg"
+          src="/images/portrait.jpeg"
+          alt=""
+          width="1600"
+          height="900"
+        />
+        <div class="hero-fade" aria-hidden="true"></div>
+        <div class="hero-copy">
+          <p class="eyebrow" data-hero-eyebrow></p>
+          <h1 data-hero-name></h1>
+          <p class="lede" data-hero-title></p>
+          <p class="hero-summary" data-hero-summary></p>
+          <div class="hero-actions">
+            <a class="btn btn-primary" href="#contact">Get in touch</a>
+            <a class="btn btn-ghost" href="#featured">See featured work</a>
+          </div>
+        </div>
+      </section>
+
+      <div id="page-body" class="page-body">
+        <canvas id="dust-canvas" aria-hidden="true"></canvas>
+
+        <section id="about" class="section" data-animate>
+          <h2>About</h2>
+          <article class="about-card">
+            <p class="about-text" data-about></p>
+          </article>
+        </section>
+
+        <section id="experience" class="section" data-animate>
+          <h2>Experience</h2>
+          <ol class="timeline" data-experience></ol>
+        </section>
+
+        <section id="skills" class="section" data-animate>
+          <h2>Skills</h2>
+          <div class="skills-grid" data-skills></div>
+        </section>
+
+        <section id="education" class="section" data-animate>
+          <h2>Education</h2>
+          <article class="edu-card">
+            <p class="eyebrow">Degree</p>
+            <h3 data-edu-degree></h3>
+            <p data-edu-meta></p>
+            <p class="edu-gpa" data-edu-gpa></p>
+          </article>
+        </section>
+
+        <section id="contact" class="section" data-animate>
+          <h2>Contact</h2>
+          <p class="contact-lead">
+            Open to conversations about web products, 3D on the web, and full
+            stack work.
+          </p>
+          <ul class="contact-list" data-contact></ul>
+        </section>
+
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <p data-footer></p>
+    </footer>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

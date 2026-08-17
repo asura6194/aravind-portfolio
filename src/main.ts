@@ -1,5 +1,5 @@
 import "./styles/main.css";
-import { canCreateWebGL, createHeroScene } from "./scene/heroScene";
+import { canCreateWebGL, createDustScene } from "./scene/dustScene";
 import { setupMotion } from "./ui/motion";
 import { setupNav } from "./ui/nav";
 import { renderPage } from "./ui/render";
@@ -8,17 +8,19 @@ renderPage();
 setupNav();
 setupMotion();
 
-const canvas = document.querySelector<HTMLCanvasElement>("#hero-canvas");
-const fallback = document.querySelector<HTMLElement>(".hero-fallback");
+const canvas = document.querySelector<HTMLCanvasElement>("#dust-canvas");
+const host = document.querySelector<HTMLElement>("#page-body");
 
-if (canvas && canCreateWebGL()) {
-  try {
-    createHeroScene(canvas);
-  } catch {
-    canvas.remove();
-    if (fallback) fallback.hidden = false;
+const startDust = () => {
+  if (canvas && host && canCreateWebGL()) {
+    try {
+      createDustScene(canvas, host);
+    } catch {
+      canvas.remove();
+    }
+  } else {
+    canvas?.remove();
   }
-} else {
-  canvas?.remove();
-  if (fallback) fallback.hidden = false;
-}
+};
+
+requestAnimationFrame(startDust);
