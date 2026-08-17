@@ -24,7 +24,7 @@ export const experience = [
     role: "Software Development Engineer",
     period: "Mar 2023 — Present",
     location: "Bengaluru",
-    logo: "/images/logos/skellam.png",
+    logo: "images/logos/skellam.png",
     logoAlt: "Skellam AI",
     points: [
       {
@@ -43,7 +43,7 @@ export const experience = [
     role: "Assistant System Engineer",
     period: "Jan 2021 — Mar 2023",
     location: "Bengaluru",
-    logo: "/images/logos/tcs.png",
+    logo: "images/logos/tcs.png",
     logoAlt: "Tata Consultancy Services",
     points: [
       {
@@ -65,7 +65,7 @@ export const experience = [
     role: "Game Developer Intern",
     period: "Jul 2019 — Oct 2019",
     location: "Bengaluru",
-    logo: "/images/logos/someshwara.png",
+    logo: "images/logos/someshwara.png",
     logoAlt: "Someshwara Software",
     points: [
       {
