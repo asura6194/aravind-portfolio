@@ -12,7 +12,7 @@ export function renderPage(): void {
   setText("[data-hero-name]", profile.name);
   setText("[data-hero-title]", profile.title);
   setText("[data-hero-summary]", profile.summary);
-  setText("[data-about]", profile.summary);
+  renderAbout();
   setText("[data-edu-degree]", education.degree);
   setText(
     "[data-edu-meta]",
@@ -76,6 +76,14 @@ function renderPoint(point: JobPoint): string {
     return `<li>${escapeHtml(point.text)}</li>`;
   }
   return `<li>${escapeHtml(point.text)} <a href="${escapeHtml(point.href)}" target="_blank" rel="noreferrer">${escapeHtml(point.hrefLabel ?? point.href)}</a></li>`;
+}
+
+function renderAbout(): void {
+  const el = document.querySelector("[data-about]");
+  if (!el) return;
+  el.innerHTML = profile.about
+    .map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`)
+    .join("");
 }
 
 function setText(selector: string, value: string): void {

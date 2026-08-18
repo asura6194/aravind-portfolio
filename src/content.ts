@@ -7,7 +7,11 @@ export const profile = {
   linkedin: "https://linkedin.com/in/aravindr194",
   linkedinLabel: "linkedin.com/in/aravindr194",
   summary:
-    "Full stack engineer who ships web applications and real-time 3D experiences. Comfortable across Angular, Java/Spring, and PlayCanvas—from product UIs and APIs to game logic and AI.",
+    "Full stack developer with 5+ years building and scaling production web applications, from customer-facing UIs to backend systems handling real load.",
+  about: [
+    "I'm a full stack developer based in Bengaluru with 5+ years turning product requirements into working software. Most of that time I've spent moving between Angular on the frontend and Java/Spring Boot on the backend — but the part I actually enjoy most is the systems thinking in between: figuring out how something should scale, fail gracefully, and stay maintainable once real users and real data hit it, not just how it should look in a demo. Outside of product work, I have a long-running soft spot for real-time 3D — this site itself is partly an excuse to keep exploring that space, built with Three.js as much for the fun of it as for the portfolio.",
+    "When I'm not at a keyboard, I'm probably on a badminton or football court, at the gym, or in a pool — I like activities that force me to actually be present. On the other end of that, I'm also very much a PC gamer, and I spend time on the creative side too: playing guitar, drawing, dabbling in design, and working through a long watchlist of movies and anime. Traveling ties it all together — it's usually where I end up doing the least screen time and the most everything else.",
+  ],
 };
 
 export const GAME_URL = "https://playcanv.as/p/M9NVSxyb/";
