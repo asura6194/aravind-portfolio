@@ -18,7 +18,6 @@ export function renderPage(): void {
     "[data-edu-meta]",
     `${education.school} · ${education.period} · ${education.location}`,
   );
-  setText("[data-edu-gpa]", `CGPA ${education.gpa}`);
   setText(
     "[data-footer]",
     `© ${new Date().getFullYear()} ${profile.name}`,
@@ -32,14 +31,23 @@ export function renderPage(): void {
         <li>
           <div class="job-head">
             <div>
-              <h3>${escapeHtml(job.role)}</h3>
-              <p class="job-meta">${escapeHtml(job.company)} · ${escapeHtml(job.period)} · ${escapeHtml(job.location)}</p>
+              <h3>${escapeHtml(job.company)}</h3>
+              <p class="job-meta">${escapeHtml(job.location)}</p>
             </div>
             <img class="job-logo" src="${escapeHtml(assetUrl(job.logo))}" alt="${escapeHtml(job.logoAlt)}" />
           </div>
-          <ul>
-            ${job.points.map((point) => renderPoint(point)).join("")}
-          </ul>
+          ${job.roles
+            .map(
+              (role) => `
+            <section class="job-role">
+              <h4>${escapeHtml(role.title)}</h4>
+              <p class="job-meta">${escapeHtml(role.period)}</p>
+              <ul>
+                ${role.points.map((point) => renderPoint(point)).join("")}
+              </ul>
+            </section>`,
+            )
+            .join("")}
         </li>`,
       )
       .join("");

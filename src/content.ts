@@ -22,74 +22,115 @@ export type JobPoint = {
   hrefLabel?: string;
 };
 
-export const experience = [
+export type Role = {
+  title: string;
+  period: string;
+  points: JobPoint[];
+};
+
+export type Experience = {
+  company: string;
+  location: string;
+  logo: string;
+  logoAlt: string;
+  roles: Role[];
+};
+
+export const experience: Experience[] = [
   {
     company: "Skellam AI",
-    role: "Software Development Engineer",
-    period: "Mar 2023 — Present",
-    location: "Bengaluru",
+    location: "Bengaluru, India",
     logo: "images/logos/skellam.png",
     logoAlt: "Skellam AI",
-    points: [
+    roles: [
       {
-        text: "Developed and integrated a customer loyalty program feature for a web application using Angular, HTML, CSS, SCSS, TypeScript, JavaScript, Java, Spring Boot, MySQL, and PostgreSQL, improving user engagement, retention, and overall customer satisfaction.",
+        title: "Software Development Engineer 2",
+        period: "Mar 2024 — Present",
+        points: [
+          {
+            text: "Promoted to SDE 2 within one year in recognition of full-stack ownership and delivery consistent with a software engineer role from day one.",
+          },
+          {
+            text: "Built an AWS Lambda function that generates up to 5 million unique coupons per configurable pool into PostgreSQL, using batched, rate-limited writes to avoid overloading database CPU and connections.",
+          },
+          {
+            text: "Leveraged AWS S3 for UI asset and application config storage consumed by Spring Boot and Lambda, and provisioned EC2 instances from prebuilt templates, attaching them to load balancers across multiple AWS regions.",
+          },
+          {
+            text: "Monitored production application health via AWS CloudWatch, analyzing logs to detect anomalies and resolve customer-reported issues and bugs.",
+          },
+        ],
       },
       {
-        text: "Collaborated with design teams and stakeholders to translate business and user requirements into intuitive user experiences, following agile methodologies and participating in design reviews and user testing.",
+        title: "UI Developer",
+        period: "Mar 2023 — Mar 2024",
+        points: [
+          {
+            text: "Developed and integrated a customer loyalty program feature for a production web application using Angular, TypeScript, JavaScript, HTML, CSS, and SCSS on the frontend and Java, Spring Boot, MySQL, and PostgreSQL on the backend, improving user engagement and customer retention.",
+          },
+          {
+            text: "Built backend APIs alongside frontend components to support new features, functioning as a full-stack contributor despite the UI Developer title.",
+          },
+          {
+            text: "Collaborated with design teams and stakeholders to translate business and user requirements into intuitive user experiences, following Agile methodologies and participating in design reviews and user acceptance testing.",
+          },
+        ],
       },
-      {
-        text: "Contributed to the continuous improvement of application architecture and performance, enhancing system reliability, scalability, and end-user experience.",
-      },
-    ] satisfies JobPoint[],
+    ],
   },
   {
     company: "Tata Consultancy Services",
-    role: "Assistant System Engineer",
-    period: "Jan 2021 — Mar 2023",
-    location: "Bengaluru",
+    location: "Bengaluru, India",
     logo: "images/logos/tcs.png",
     logoAlt: "Tata Consultancy Services",
-    points: [
+    roles: [
       {
-        text: "Developed and delivered project features as a collaborative member of an agile Scrum team, ensuring the timely completion of tasks in a project life cycle management web application.",
+        title: "Assistant System Engineer",
+        period: "Jan 2021 — Mar 2023",
+        points: [
+          {
+            text: "Developed and delivered project features as a member of an Agile Scrum team, consistently meeting sprint deadlines on a project lifecycle management web application.",
+          },
+          {
+            text: "Built backend APIs for core application features including mailers, reports, and batch jobs, enabling seamless data exchange between system modules.",
+          },
+          {
+            text: "Identified and resolved over 90 performance bottlenecks and bugs, improving application stability and user experience while maintaining code quality through unit testing and peer code reviews.",
+          },
+        ],
       },
-      {
-        text: "Designed, developed, and enhanced user interfaces in close collaboration with clients and design teams, resulting in intuitive and visually appealing user experiences., and batch jobs.",
-      },
-      {
-        text: "Implemented backend APIs for diverse features, including Mailers, Reports, and Batch jobs, enhancing the application's functionality and facilitating seamless data exchange.",
-      },
-      {
-        text: "Proactively identified and resolved over 90 performance bottlenecks and bugs, optimizing the application's user experience and ensuring high quality standards through unit tests, code reviews, and adherence to industry best practices.",
-      },
-    ] satisfies JobPoint[],
+    ],
   },
   {
     company: "Someshwara Software Pvt Ltd",
-    role: "Game Developer Intern",
-    period: "Jul 2019 — Oct 2019",
-    location: "Bengaluru",
+    location: "Bengaluru, India",
     logo: "images/logos/someshwara.png",
     logoAlt: "Someshwara Software",
-    points: [
+    roles: [
       {
-        text: "Designed and developed a 3D Cube tic-tac-toe game using Playcanvas WebGL game engine.",
+        title: "Game Developer Intern",
+        period: "Jul 2019 — Oct 2019",
+        points: [
+          {
+            text: "Designed and developed a 3D cube-based tic-tac-toe game using the PlayCanvas WebGL game engine.",
+          },
+          {
+            text: "Built 3D assets, user interfaces, and core game logic for the application.",
+          },
+          {
+            text: "Implemented a game-playing AI opponent using the Minimax algorithm.",
+          },
+          {
+            text: "Collaborated with team members on game design, feature development, and code review.",
+          },
+          {
+            text: "Try the game out on your mobile:",
+            href: GAME_URL,
+            hrefLabel: GAME_URL.replace("https://", ""),
+          },
+        ],
       },
-      {
-        text: "Developed 3D assets, user Interfaces, and game logic used in the game.",
-      },
-      {
-        text: "Developed game-playing AI using the Mini-max algorithm.",
-      },
-      {
-        text: "Collaborated with other team members for game design and review.",
-      },
-      {
-        text: "Try the game out on your mobile:",
-        href: GAME_URL,
-        hrefLabel: GAME_URL.replace("https://", ""),
-      },
-    ] satisfies JobPoint[],
+    ],
   },
 ];
 
@@ -98,7 +139,6 @@ export const education = {
   school: "Visvesvaraya Technological University",
   period: "2016 — 2020",
   location: "Bengaluru",
-  gpa: "7.4 / 10",
 };
 
 export const skills = {

@@ -339,7 +339,7 @@ h3 {
 .about-card,
 .edu-card,
 .featured-card,
-.timeline li,
+.timeline > li,
 .skill-group {
   background: var(--bg-elevated);
   border: 1px solid var(--line);
@@ -396,11 +396,6 @@ h3 {
   margin: 0.9rem 0 0;
 }
 
-.edu-gpa {
-  color: var(--accent);
-  margin-bottom: 0;
-}
-
 .timeline {
   list-style: none;
   margin: 0;
@@ -413,6 +408,21 @@ h3 {
   color: var(--muted);
   font-size: 0.82rem;
   margin: 0 0 0.75rem;
+}
+
+.job-role + .job-role {
+  margin-top: 1.15rem;
+  padding-top: 1.15rem;
+  border-top: 1px solid var(--line);
+}
+
+.job-role h4 {
+  margin: 0 0 0.2rem;
+  font-size: 1.05rem;
+}
+
+.job-role .job-meta {
+  margin-bottom: 0.55rem;
 }
 
 .timeline ul {
