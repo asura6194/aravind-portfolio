@@ -1,8 +1,8 @@
 import { defineConfig } from "vite";
 
-export default defineConfig(({ mode }) => ({
-  base: mode === "production" ? "/aravind-portfolio/" : "/",
+export default defineConfig({
+  base: "/",
   server: {
     port: 5173,
   },
-}));
+});
