@@ -2,7 +2,6 @@ export const profile = {
   name: "Aravind R",
   title: "Full Stack Web Developer",
   location: "Bengaluru, India",
-  phone: "+91 8867236457",
   email: "aravind.r194@gmail.com",
   linkedin: "https://linkedin.com/in/aravindr194",
   linkedinLabel: "linkedin.com/in/aravindr194",

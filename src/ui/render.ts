@@ -72,7 +72,6 @@ export function renderPage(): void {
   if (contact) {
     contact.innerHTML = `
       <li><a href="mailto:${profile.email}">${escapeHtml(profile.email)}</a></li>
-      <li><a href="tel:${profile.phone.replace(/\s+/g, "")}">${escapeHtml(profile.phone)}</a></li>
       <li><a href="${profile.linkedin}" target="_blank" rel="noreferrer">${escapeHtml(profile.linkedinLabel)}</a></li>
       <li><a href="${escapeHtml(assetUrl("Aravind.pdf"))}" download>Download resume (PDF)</a></li>
     `;
