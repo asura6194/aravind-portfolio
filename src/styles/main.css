@@ -2,10 +2,10 @@
   --bg: #121018;
   --bg-elevated: #1a1420cc;
   --line: #3d2530;
-  --text: #f2e6e8;
-  --muted: #9a7882;
-  --accent: #ff3d5a;
-  --accent-2: #ff6b82;
+  --text: #d2353e;
+  --muted: #d2353e;
+  --accent: #d2353e;
+  --accent-2: #d2353e;
   --accent-dim: #6b2a38;
   --radius: 14px;
   --header-h: 4rem;
@@ -242,7 +242,7 @@ h3 {
 }
 
 .hero-copy .hero-summary {
-  color: #d4b8be;
+  color: var(--text);
 }
 
 .eyebrow {
@@ -340,11 +340,31 @@ h3 {
 .edu-card,
 .featured-card,
 .timeline > li,
-.skill-group {
-  background: var(--bg-elevated);
-  border: 1px solid var(--line);
+.skill-group,
+.contact-card {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background: none;
+  border: none;
   border-radius: var(--radius);
   padding: 1.25rem 1.4rem;
+}
+
+.hex-panel-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  pointer-events: none;
+  background: transparent;
+}
+
+.hex-panel-inner {
+  position: relative;
+  z-index: 1;
 }
 
 .about-text {
@@ -451,7 +471,7 @@ h3 {
 }
 
 .chips li {
-  border: 1px solid var(--line);
+  border: 1px solid var(--text);
   border-radius: 999px;
   padding: 0.25rem 0.7rem;
   font-size: 0.78rem;

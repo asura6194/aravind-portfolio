@@ -1,10 +1,12 @@
 import "./styles/main.css";
 import { canCreateWebGL, createDustScene } from "./scene/dustScene";
+import { setupHexPanels } from "./ui/hexPanels";
 import { setupMotion } from "./ui/motion";
 import { setupNav } from "./ui/nav";
 import { renderPage } from "./ui/render";
 
 renderPage();
+setupHexPanels();
 setupNav();
 setupMotion();
 

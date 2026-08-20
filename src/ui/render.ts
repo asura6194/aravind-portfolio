@@ -28,7 +28,7 @@ export function renderPage(): void {
     timeline.innerHTML = experience
       .map(
         (job) => `
-        <li>
+        <li class="hex-panel">
           <div class="job-head">
             <div>
               <h3>${escapeHtml(job.company)}</h3>
@@ -58,7 +58,7 @@ export function renderPage(): void {
     skillsRoot.innerHTML = Object.entries(skills)
       .map(
         ([group, items]) => `
-        <article class="skill-group">
+        <article class="skill-group hex-panel">
           <h3>${escapeHtml(group)}</h3>
           <ul class="chips">
             ${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}

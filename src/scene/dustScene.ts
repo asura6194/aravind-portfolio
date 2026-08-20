@@ -191,6 +191,12 @@ const EMBER_TAIL = 15;
 const EMBER_TAIL_GAP_PX = 18;
 const EMBER_FLICKER = 0.08;
 
+/** Hard clip line, in pixels from the canvas bottom. */
+const EMBER_BOTTOM_CUTOFF_PX = 96;
+
+/** Extra random height above that line, in pixels. */
+const EMBER_BOTTOM_CUTOFF_VARIANCE_PX = 160;
+
 // =============================================================================
 
 type Particle = {
@@ -218,6 +224,7 @@ type Ember = {
   y: number;
   z: number;
   chars: number[];
+  killPx: number;
 };
 
 type EmberLayer = {
@@ -530,6 +537,14 @@ function edgeFade(v: number): number {
   return 1;
 }
 
+function emberKillY(host: HTMLElement, killPx: number): number {
+  return -FRUSTUM + pxToWorld(killPx, host);
+}
+
+function randomKillPx(): number {
+  return EMBER_BOTTOM_CUTOFF_PX + Math.random() * EMBER_BOTTOM_CUTOFF_VARIANCE_PX;
+}
+
 function hostAspect(host: HTMLElement): number {
   return (host.clientWidth || 1) / (host.clientHeight || 1);
 }
@@ -740,6 +755,7 @@ function spawnEmber(host: HTMLElement, scatter: boolean): Ember {
       : FRUSTUM + tailLen * Math.random(),
     z: randomDepth(),
     chars,
+    killPx: randomKillPx(),
   };
 }
 
@@ -791,10 +807,12 @@ function tickEmbers(
   if (!reduceMotion) {
     for (const ember of embers.streams) {
       ember.y -= speed;
-      if (ember.y + tailLen < -FRUSTUM) {
+      const killY = emberKillY(host, ember.killPx);
+      if (ember.y + tailLen < killY) {
         ember.x = (Math.random() - 0.5) * worldW;
         ember.y = FRUSTUM + gap * Math.random();
         ember.z = randomDepth();
+        ember.killPx = randomKillPx();
         for (let t = 0; t < EMBER_TAIL; t += 1) {
           ember.chars[t] = randomCharIndex();
         }
@@ -812,11 +830,14 @@ function tickEmbers(
     const ember = embers.streams[s];
     const near = depthAmount(ember.z);
     const scale = size * (0.32 + near * 0.68);
+    const killY = emberKillY(host, ember.killPx);
     for (let t = 0; t < EMBER_TAIL; t += 1) {
       const index = s * EMBER_TAIL + t;
+      const glyphY = ember.y + t * gap;
+      const visible = glyphY - scale * 0.5 > killY;
       const fade = ((EMBER_TAIL - t) / EMBER_TAIL) * (0.22 + near * 0.78);
-      dummy.position.set(ember.x, ember.y + t * gap, ember.z);
-      dummy.scale.setScalar(scale);
+      dummy.position.set(ember.x, glyphY, ember.z);
+      dummy.scale.setScalar(visible ? scale : 0);
       dummy.updateMatrix();
       embers.mesh.setMatrixAt(index, dummy.matrix);
       color.setHex(ACCENT_RED);
