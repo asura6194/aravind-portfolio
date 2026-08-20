@@ -21,11 +21,11 @@ import {
 } from "three";
 
 const FRUSTUM = 5;
-const GRID_SPACING_PX = 7;
+const GRID_SPACING_PX = 12;
 const PARTICLE_RADIUS_PX = 1.2;
-const MOUSE_RADIUS_PX = 12;
+const MOUSE_RADIUS_PX = 40;
 const WAVE_SPEED = 0.75;
-const MAX_PARTICLES = 18000;
+const MAX_PARTICLES = 2000000;
 const DUST_EDGE_FADE = 0.24;
 const ACCENT_RED = 0xff3d5a;
 const ACCENT_RED_DIM = 0xc42e48;

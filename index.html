@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="is-loading">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -8,6 +8,32 @@
       content="Aravind R — Full Stack Web Developer in Bengaluru. Web apps, APIs, and 3D experiences."
     />
     <title>Aravind R — Full Stack Web Developer</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: #121018;
+      }
+      html.is-loading,
+      html.is-loading body {
+        overflow: hidden;
+        background: #121018;
+      }
+      html.is-loading body > :not(#loading-screen) {
+        visibility: hidden !important;
+        pointer-events: none !important;
+      }
+      #loading-screen {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483647;
+        width: 100%;
+        height: 100%;
+        background: #121018;
+        visibility: visible !important;
+        pointer-events: all;
+      }
+    </style>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -16,6 +42,13 @@
     />
   </head>
   <body>
+    <div
+      id="loading-screen"
+      class="loading-screen"
+      role="status"
+      aria-live="polite"
+      aria-label="Loading"
+    ></div>
     <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header">
       <a class="logo" href="#hero">AR</a>
@@ -45,6 +78,7 @@
           alt=""
           width="1600"
           height="900"
+          fetchpriority="low"
         />
         <div class="hero-fade" aria-hidden="true"></div>
         <div class="hero-copy">

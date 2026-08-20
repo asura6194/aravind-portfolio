@@ -1,12 +1,19 @@
-const HEX_SIZE_PX = 7.2;
-const HEX_GAP_PX = 1.6;
-const SQRT3 = Math.sqrt(3);
+import {
+  HEX_COL_W,
+  HEX_FILL,
+  HEX_HIGHLIGHT,
+  HEX_ROW_H,
+  HEX_SIZE_PX,
+  HEX_SPACING,
+  hexCenter,
+  hexFits,
+  hexTint,
+} from "../hex/hexGridConfig";
+
 const PANEL_SELECTOR = ".hex-panel";
-const HEX_FILL = "#1e1c24";
-const HEX_HIGHLIGHT = "#2a282f";
 
 /** Wave band width in hex cells. Try 3–5. */
-const WAVE_WIDTH_HEX = 5;
+const WAVE_WIDTH_HEX = 10;
 
 /** Wave travel speed in pixels per second. */
 const WAVE_SPEED_PX = 160;
@@ -18,9 +25,7 @@ const WAVE_REST_PX = 20;
 const RAIN_DROP_COUNT = 4;
 
 /** Peak flip angle in degrees: 0 → +angle → 0 → −angle → 0 as the ring passes. */
-const WAVE_FLIP_DEG = 45;
-
-const HEX_SPACING = SQRT3 * HEX_SIZE_PX + HEX_GAP_PX;
+const WAVE_FLIP_DEG = 70;
 
 type HexCell = {
   x: number;
@@ -128,66 +133,20 @@ function resizePanel(panel: HTMLElement, state: PanelState): void {
   drawHexes(state, performance.now() / 1000);
 }
 
-function hexFits(
-  cx: number,
-  cy: number,
-  hexR: number,
-  width: number,
-  height: number,
-  cornerR: number,
-): boolean {
-  const x0 = hexR;
-  const y0 = hexR;
-  const x1 = width - hexR;
-  const y1 = height - hexR;
-  if (cx < x0 || cx > x1 || cy < y0 || cy > y1) return false;
-
-  const ir = Math.max(0, cornerR - hexR);
-  if (ir <= 0) return true;
-
-  const inLeft = cx < x0 + ir;
-  const inRight = cx > x1 - ir;
-  const inTop = cy < y0 + ir;
-  const inBottom = cy > y1 - ir;
-
-  if (inLeft && inTop) {
-    return Math.hypot(cx - (x0 + ir), cy - (y0 + ir)) <= ir;
-  }
-  if (inRight && inTop) {
-    return Math.hypot(cx - (x1 - ir), cy - (y0 + ir)) <= ir;
-  }
-  if (inLeft && inBottom) {
-    return Math.hypot(cx - (x0 + ir), cy - (y1 - ir)) <= ir;
-  }
-  if (inRight && inBottom) {
-    return Math.hypot(cx - (x1 - ir), cy - (y1 - ir)) <= ir;
-  }
-  return true;
-}
-
 function buildHexCells(
   width: number,
   height: number,
   cornerR: number,
 ): HexCell[] {
-  const r = HEX_SIZE_PX;
-  const colW = SQRT3 * r + HEX_GAP_PX;
-  const rowH = 1.5 * r + HEX_GAP_PX;
   const cells: HexCell[] = [];
-  const cols = Math.ceil(width / colW) + 2;
-  const rows = Math.ceil(height / rowH) + 2;
+  const cols = Math.ceil(width / HEX_COL_W) + 2;
+  const rows = Math.ceil(height / HEX_ROW_H) + 2;
 
   for (let row = -1; row < rows; row += 1) {
-    const offset = row % 2 === 0 ? 0 : colW / 2;
     for (let col = -1; col < cols; col += 1) {
-      const x = col * colW + offset;
-      const y = row * rowH;
-      if (!hexFits(x, y, r, width, height, cornerR)) continue;
-      cells.push({
-        x,
-        y,
-        tint: ((col * 7 + row * 13) % 11) / 10,
-      });
+      const { x, y } = hexCenter(col, row);
+      if (!hexFits(x, y, HEX_SIZE_PX, width, height, cornerR)) continue;
+      cells.push({ x, y, tint: hexTint(col, row) });
     }
   }
   return cells;
