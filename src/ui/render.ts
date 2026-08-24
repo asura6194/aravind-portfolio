@@ -8,7 +8,6 @@ import {
 } from "../content";
 
 export function renderPage(): void {
-  setText("[data-hero-eyebrow]", profile.location);
   setText("[data-hero-name]", profile.name);
   setText("[data-hero-title]", profile.title);
   setText("[data-hero-summary]", profile.summary);

@@ -19,6 +19,11 @@ import {
   SphereGeometry,
   WebGLRenderer,
 } from "three";
+import {
+  EMBER_CHARACTERS,
+  EMBER_FONT_STACK,
+  randomEmberCharIndex,
+} from "../embers/emberCharacters";
 
 const FRUSTUM = 5;
 const GRID_SPACING_PX = 12;
@@ -52,120 +57,6 @@ const GRID_FADE_DISTANCE = 1.9;
 // =============================================================================
 // EMBERS — Matrix-style Kannada / Hindi glyphs with a 5-character tail
 // =============================================================================
-
-const EMBER_CHARACTERS = [
-  "ಅ",
-  "ಆ",
-  "ಇ",
-  "ಈ",
-  "ಉ",
-  "ಊ",
-  "ಋ",
-  "ಎ",
-  "ಏ",
-  "ಐ",
-  "ಒ",
-  "ಓ",
-  "ಔ",
-  "ಕ",
-  "ಖ",
-  "ಗ",
-  "ಘ",
-  "ಙ",
-  "ಚ",
-  "ಛ",
-  "ಜ",
-  "ಝ",
-  "ಞ",
-  "ಟ",
-  "ಠ",
-  "ಡ",
-  "ಢ",
-  "ಣ",
-  "ತ",
-  "ಥ",
-  "ದ",
-  "ಧ",
-  "ನ",
-  "ಪ",
-  "ಫ",
-  "ಬ",
-  "ಭ",
-  "ಮ",
-  "ಯ",
-  "ರ",
-  "ಲ",
-  "ವ",
-  "ಶ",
-  "ಷ",
-  "ಸ",
-  "ಹ",
-  "ಳ",
-  "ೞ",
-  "೧",
-  "೨",
-  "೩",
-  "೪",
-  "೫",
-  "೬",
-  "೭",
-  "೮",
-  "೯",
-  "अ",
-  "आ",
-  "इ",
-  "ई",
-  "उ",
-  "ऊ",
-  "ऋ",
-  "ए",
-  "ऐ",
-  "ओ",
-  "औ",
-  "क",
-  "ख",
-  "ग",
-  "घ",
-  "ङ",
-  "च",
-  "छ",
-  "ज",
-  "झ",
-  "ञ",
-  "ट",
-  "ठ",
-  "ड",
-  "ढ",
-  "ण",
-  "त",
-  "थ",
-  "द",
-  "ध",
-  "न",
-  "प",
-  "फ",
-  "ब",
-  "भ",
-  "म",
-  "य",
-  "र",
-  "ल",
-  "व",
-  "श",
-  "ष",
-  "स",
-  "ह",
-  "०",
-  "१",
-  "२",
-  "३",
-  "४",
-  "५",
-  "६",
-  "७",
-  "८",
-  "९",
-];
 
 /** Fall speed in pixels per frame. */
 const EMBER_SPEED_PX = 0.65;
@@ -642,7 +533,7 @@ function emberCount(host: HTMLElement): number {
 }
 
 function randomCharIndex(): number {
-  return Math.floor(Math.random() * EMBER_CHARACTERS.length);
+  return randomEmberCharIndex();
 }
 
 function randomDepth(): number {
@@ -676,7 +567,7 @@ function createCharAtlas(): {
   ctx.fillStyle = "#ffffff";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.font = `700 ${Math.floor(cell * 0.62)}px "Nirmala UI","Noto Sans Kannada","Noto Sans Devanagari",sans-serif`;
+  ctx.font = `700 ${Math.floor(cell * 0.62)}px ${EMBER_FONT_STACK}`;
 
   for (let i = 0; i < count; i += 1) {
     const col = i % cols;

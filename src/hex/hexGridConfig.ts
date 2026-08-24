@@ -1,4 +1,4 @@
-export const HEX_SIZE_PX = 7.2;
+export const HEX_SIZE_PX = 5.2;
 export const HEX_GAP_PX = 1.6;
 export const SQRT3 = Math.sqrt(3);
 export const HEX_FILL = "#1e1c24";

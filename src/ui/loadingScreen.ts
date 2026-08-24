@@ -1,4 +1,4 @@
-import {
+﻿import {
   HEX_FILL,
   HEX_HIGHLIGHT,
   HEX_SIZE_PX,
@@ -10,6 +10,11 @@ import {
   readCssColor,
   traceHex,
 } from "../hex/hexGridConfig";
+import {
+  EMBER_CHARACTERS,
+  EMBER_FONT_STACK,
+  randomEmberCharIndex,
+} from "../embers/emberCharacters";
 
 /**
  * Gap between hexes on the loading canvas, in pixels.
@@ -22,13 +27,73 @@ const LOADING_ROW_H = 1.5 * HEX_SIZE_PX + LOADING_HEX_GAP_PX;
 const LOADING_RING_R = HEX_SIZE_PX + LOADING_HEX_GAP_PX / SQRT3;
 const SNAKE_WIDTH_PX = Math.max(0.5, LOADING_HEX_GAP_PX - 4);
 
-const SNAKE_COUNT = 120;
+const SNAKE_COUNT = 380;
 const TRAVEL_MS = 2500;
-const TOTAL_MS = 3000;
-const FADE_MS = 100;
-const SNAKE_LEN_PX = 440;
+/** Brief hold after snakes reach the meshed center hex. */
+const HOLD_MS = 280;
+/** Zoom from full grid until mesh snakes become ember character rows. */
+const ZOOM_IN_MS = 3200;
+/** Short settle on the full-screen ember mesh before clearing the canvas bg. */
+const EMBER_HOLD_MS = 150;
+/** Slow fade: canvas blackish fill → transparent over the live page. */
+const BG_FADE_MS = 300;
+/** After bg is clear, ease out remaining ember graphics. */
+const FADE_MS = 1500;
+const ZOOM_START_MS = TRAVEL_MS + HOLD_MS;
+const EMBER_HOLD_START_MS = ZOOM_START_MS + ZOOM_IN_MS;
+const BG_FADE_START_MS = EMBER_HOLD_START_MS + EMBER_HOLD_MS;
+const FADE_START_MS = BG_FADE_START_MS + BG_FADE_MS;
+const TOTAL_MS = FADE_START_MS + FADE_MS;
+const SNAKE_LEN_PX = 100;
 const MAX_STAGGER_MS = 380;
 const NODE_QUANT = 10;
+
+/**
+ * Fine hex lattice inside the center cell. Thin snakes (~1/12 outer width)
+ * fill the hex so it reads solid from afar; zoom reveals the gaps.
+ */
+const MESH_CELL_PX = HEX_SIZE_PX / 10;
+const MESH_SNAKE_WIDTH_PX = SNAKE_WIDTH_PX / 12;
+/** Empty hole left in the mesh for the final zoom-through. */
+const MESH_GAP_R = MESH_CELL_PX * 1.35;
+/** Three stacked grids; lower layers rotated + translated so each reads clearly. */
+const MESH_LAYERS = 3;
+/**
+ * Back → front rotations. Avoid 60° (hex lattice maps onto itself).
+ * 30° / 15° / 0° keeps three distinct orientations.
+ */
+const MESH_LAYER_ANGLES = [Math.PI / 6, Math.PI / 12, 0];
+/**
+ * Back → front world-space offsets (multiples of cell size) so the third
+ * layer isn't buried under the others.
+ */
+const MESH_LAYER_OFFSETS: ReadonlyArray<{ x: number; y: number }> = [
+  { x: -0.42, y: -0.38 },
+  { x: 0.36, y: -0.28 },
+  { x: 0, y: 0 },
+];
+/** Fraction of lattice edges kept (incomplete honeycomb). */
+const MESH_EDGE_KEEP = 0.82;
+
+/** Parallel ember rows packed across each mesh snake. */
+const MESH_EMBER_LINES = 5;
+/** Match dustScene in-place glyph flicker rate. */
+const MESH_EMBER_FLICKER = 0.08;
+/**
+ * Screen-space snake thickness where solid mesh starts dissolving into glyphs.
+ * Full morph once the inner mesh fills the frame like the deep-zoom hold.
+ */
+const MESH_EMBER_MORPH_START_PX = 18;
+const MESH_EMBER_MORPH_FULL_PX = 38;
+/** Screen-space border between outer lasers and the center mesh. */
+const CENTER_HEX_BORDER_PX = 24;
+/** Extra glyph size on the loading mesh embers only (not dustScene). */
+const MESH_EMBER_FONT_EXTRA_PX = 4;
+/** How many front mesh layers morph into ember characters. */
+const MESH_EMBER_LAYERS = 2;
+/** Atlas cell size for fast drawImage glyphs (avoids fillText per frame). */
+const EMBER_ATLAS_CELL = 64;
+const EMBER_ATLAS_COLS = 16;
 
 type Vec = { x: number; y: number };
 
@@ -55,6 +120,40 @@ type HexCell = {
   tint: number;
 };
 
+/** One mesh snake edge with 5 parallel ember rows (chars swap in place). */
+type MeshEdgeEmber = {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  len: number;
+  angle: number;
+  ux: number;
+  uy: number;
+  nx: number;
+  ny: number;
+  slots: number;
+  chars: Uint16Array;
+};
+
+/**
+ * Vector hex lattice for the center cell. Stroked live under the camera so
+ * zoom stays sharp (a baked bitmap blurs once scaled past its resolution).
+ */
+type CenterMesh = {
+  path: Path2D;
+  edges: MeshEdgeEmber[];
+  gapR: number;
+  clipR: number;
+  cell: number;
+};
+
+type EmberAtlas = {
+  canvas: HTMLCanvasElement;
+  cell: number;
+  cols: number;
+};
+
 export function setupLoadingScreen(): Promise<void> {
   return new Promise((resolve) => {
     const overlay =
@@ -76,12 +175,16 @@ export function setupLoadingScreen(): Promise<void> {
     document.body.classList.add("is-loading");
 
     const ctx = canvas.getContext("2d");
+    let removePauseHotkey: (() => void) | null = null;
     const abort = () => {
+      cancelAnimationFrame(raf);
+      removePauseHotkey?.();
       overlay.remove();
       document.documentElement.classList.remove("is-loading");
       document.body.classList.remove("is-loading");
       resolve();
     };
+    let raf = 0;
     if (!ctx) {
       abort();
       return;
@@ -100,45 +203,108 @@ export function setupLoadingScreen(): Promise<void> {
     const bg = readCssColor("--bg", HEX_FILL);
     const accent = readCssColor("--accent", HEX_HIGHLIGHT);
     const accentRgb = cssToRgb(accent);
-    overlay.style.background = bg;
+    const bgRgb = cssToRgb(bg);
+    // Page stays visible underneath; canvas paints its own opaque cover early on.
+    overlay.style.background = "transparent";
 
     const cells = buildCells(width, height);
     const center = pickCenterHex(cells, width, height);
     const { nodes, goals, hexVerts } = buildGapGraph(width, height, center);
-    const snakes = spawnSnakes(nodes, goals, hexVerts, cells);
+    const snakes = spawnSnakes(nodes, goals, hexVerts, cells, center);
+    const mesh = buildCenterMesh(center);
+    const emberAtlas = createEmberAtlas(accent);
+
+    // Ember framing zoom — stay here and fade over the page (no empty-hole flash).
+    const zoomEmber = Math.max(
+      MESH_EMBER_MORPH_FULL_PX / Math.max(MESH_SNAKE_WIDTH_PX, 0.0001),
+      zoomHexFill(width, height) * 1.35,
+    );
+    const zoomMax = zoomEmber;
 
     const sample = { x: 0, y: 0 };
-    let raf = 0;
+    let activeCells = cells;
+    /** Settled laser trails as one Path2D — stroked live so zoom stays sharp. */
+    let settledSnakes: Path2D | null = null;
     let fading = false;
+    let paused = false;
+    let pauseStartedAt = 0;
+    let pausedTotalMs = 0;
     const start = performance.now();
+
+    const elapsed = (now: number) => now - start - pausedTotalMs;
 
     const finish = () => {
       cancelAnimationFrame(raf);
+      removePauseHotkey?.();
       overlay.remove();
       document.documentElement.classList.remove("is-loading");
       document.body.classList.remove("is-loading");
       resolve();
     };
 
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.code !== "Space" && event.key !== " ") return;
+      event.preventDefault();
+      if (paused) {
+        pausedTotalMs += performance.now() - pauseStartedAt;
+        paused = false;
+      } else {
+        paused = true;
+        pauseStartedAt = performance.now();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    removePauseHotkey = () => window.removeEventListener("keydown", onKeyDown);
+
     const tick = (now: number) => {
-      const t = now - start;
+      if (paused) {
+        raf = requestAnimationFrame(tick);
+        return;
+      }
+
+      const t = elapsed(now);
+      const zoom = cameraZoom(t, zoomMax, zoomEmber);
+
+      if (t >= TRAVEL_MS && !settledSnakes) {
+        settledSnakes = buildUniqueLaserPath(snakes, true, t, sample);
+        activeCells = cells;
+      }
+
+      // Drop hexes that have left the viewport while zooming.
+      if (t >= ZOOM_START_MS && activeCells.length > 1) {
+        activeCells = cullVisibleCells(activeCells, center, zoom, width, height);
+      }
+
+      // Canvas bg stays solid until the ember mesh fills the screen, then
+      // slowly clears to show the page underneath (embers stay on top).
+      const pageReveal = pageRevealAmount(t);
+      const graphicsFade = graphicsFadeAmount(t);
+
       drawFrame(ctx, {
         t,
         width,
         height,
         bg,
+        bgRgb,
         accent,
         accentRgb,
-        cells,
+        cells: activeCells,
         center,
         snakes,
+        mesh,
+        emberAtlas,
+        settledSnakes,
+        zoomMax,
+        zoomEmber,
+        pageReveal,
+        graphicsFade,
         sample,
       });
 
-      if (t >= TOTAL_MS - FADE_MS && !fading) {
+      if (t >= FADE_START_MS && !fading) {
         fading = true;
         document.documentElement.classList.remove("is-loading");
-        overlay.classList.add("is-exit");
+        document.body.classList.remove("is-loading");
       }
       if (t >= TOTAL_MS) {
         finish();
@@ -152,11 +318,19 @@ export function setupLoadingScreen(): Promise<void> {
       width,
       height,
       bg,
+      bgRgb,
       accent,
       accentRgb,
-      cells,
+      cells: activeCells,
       center,
       snakes,
+      mesh,
+      emberAtlas,
+      settledSnakes,
+      zoomMax,
+      zoomEmber,
+      pageReveal: 0,
+      graphicsFade: 1,
       sample,
     });
     raf = requestAnimationFrame(tick);
@@ -310,6 +484,7 @@ function spawnSnakes(
   goals: Set<number>,
   hexVerts: Map<string, number[]>,
   cells: HexCell[],
+  center: HexCell,
 ): Snake[] {
   const starts = pickEdgeSpawnNodes(nodes, hexVerts, cells);
   const snakes: Snake[] = [];
@@ -327,12 +502,23 @@ function spawnSnakes(
         : null) ?? bfsPath(nodes, start, goals, s + 1);
     if (!pathIds || pathIds.length < 2) continue;
 
-    const xs = new Float32Array(pathIds.length);
-    const ys = new Float32Array(pathIds.length);
-    const cum = new Float32Array(pathIds.length);
-    for (let i = 0; i < pathIds.length; i += 1) {
-      xs[i] = nodes[pathIds[i]].x;
-      ys[i] = nodes[pathIds[i]].y;
+    // Extend into the center hex so snakes visually enter it.
+    const pts: Array<{ x: number; y: number }> = pathIds.map((id) => ({
+      x: nodes[id].x,
+      y: nodes[id].y,
+    }));
+    const last = pts[pts.length - 1];
+    const midX = last.x + (center.x - last.x) * 0.55;
+    const midY = last.y + (center.y - last.y) * 0.55;
+    pts.push({ x: midX, y: midY });
+    pts.push({ x: center.x, y: center.y });
+
+    const xs = new Float32Array(pts.length);
+    const ys = new Float32Array(pts.length);
+    const cum = new Float32Array(pts.length);
+    for (let i = 0; i < pts.length; i += 1) {
+      xs[i] = pts[i].x;
+      ys[i] = pts[i].y;
       if (i > 0) {
         cum[i] =
           cum[i - 1] + Math.hypot(xs[i] - xs[i - 1], ys[i] - ys[i - 1]);
@@ -592,6 +778,346 @@ function sampleAt(
   out.y = ys[i - 1] + (ys[i] - ys[i - 1]) * u;
 }
 
+function pointInHex(px: number, py: number, cx: number, cy: number, r: number): boolean {
+  const dx = (px - cx) / r;
+  const dy = (py - cy) / r;
+  const q = (SQRT3 / 3) * dx - (1 / 3) * dy;
+  const rr = (2 / 3) * dy;
+  const s = -q - rr;
+  return Math.max(Math.abs(q), Math.abs(rr), Math.abs(s)) <= 1.02;
+}
+/**
+ * One Path2D hex lattice; layers apply rotate + translate at draw time.
+ * Vector strokes stay sharp at any zoom (unlike a scaled bitmap).
+ * Ember rows are stored per edge and only drawn when that snake is on-screen.
+ */
+function buildCenterMesh(center: HexCell): CenterMesh {
+  const clipR = HEX_SIZE_PX * 0.98;
+  const { path, edges } = buildHexGridLayer(
+    center.x,
+    center.y,
+    clipR,
+    MESH_CELL_PX,
+    MESH_GAP_R,
+  );
+  return {
+    path,
+    edges,
+    gapR: MESH_GAP_R,
+    clipR,
+    cell: MESH_CELL_PX,
+  };
+}
+
+function buildHexGridLayer(
+  cx: number,
+  cy: number,
+  clipR: number,
+  cell: number,
+  gapR: number,
+): { path: Path2D; edges: MeshEdgeEmber[] } {
+  const path = new Path2D();
+  const edges: MeshEdgeEmber[] = [];
+  const colW = SQRT3 * cell;
+  const rowH = 1.5 * cell;
+  const span = Math.ceil((clipR * 2.2) / cell) + 2;
+  const seen = new Set<string>();
+  const quant = (v: number) => Math.round(v * 1000);
+  const font = MESH_SNAKE_WIDTH_PX / 5.4;
+  // Slightly wider spacing → fewer glyphs, still reads as dense rows when zoomed.
+  const gap = Math.max(font * 1.35, MESH_SNAKE_WIDTH_PX * 0.28);
+
+  const addEdge = (x0: number, y0: number, x1: number, y1: number) => {
+    const d0 = Math.hypot(x0 - cx, y0 - cy);
+    const d1 = Math.hypot(x1 - cx, y1 - cy);
+    if (d0 < gapR && d1 < gapR) return;
+    if (
+      !pointInHex(x0, y0, cx, cy, clipR) ||
+      !pointInHex(x1, y1, cx, cy, clipR)
+    ) {
+      return;
+    }
+
+    const qa0 = quant(x0);
+    const qb0 = quant(y0);
+    const qa1 = quant(x1);
+    const qb1 = quant(y1);
+    const key =
+      qa0 < qa1 || (qa0 === qa1 && qb0 <= qb1)
+        ? `${qa0},${qb0}:${qa1},${qb1}`
+        : `${qa1},${qb1}:${qa0},${qb0}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    path.moveTo(x0, y0);
+    path.lineTo(x1, y1);
+
+    const dx = x1 - x0;
+    const dy = y1 - y0;
+    const len = Math.hypot(dx, dy);
+    if (len < 0.0001) return;
+    const ux = dx / len;
+    const uy = dy / len;
+    const slots = Math.max(1, Math.round(len / gap));
+    const chars = new Uint16Array(MESH_EMBER_LINES * slots);
+    for (let i = 0; i < chars.length; i += 1) {
+      chars[i] = randomEmberCharIndex();
+    }
+    edges.push({
+      x0,
+      y0,
+      x1,
+      y1,
+      len,
+      angle: Math.atan2(dy, dx),
+      ux,
+      uy,
+      nx: -uy,
+      ny: ux,
+      slots,
+      chars,
+    });
+  };
+
+  for (let row = -span; row <= span; row += 1) {
+    const offset = row % 2 === 0 ? 0 : colW / 2;
+    for (let col = -span; col <= span; col += 1) {
+      const hx = cx + col * colW + offset;
+      const hy = cy + row * rowH;
+      if (!pointInHex(hx, hy, cx, cy, clipR + cell * 0.45)) continue;
+
+      for (let i = 0; i < 6; i += 1) {
+        const keep =
+          ((col * 17 + row * 31 + i * 13) & 255) / 255 < MESH_EDGE_KEEP;
+        if (!keep) continue;
+        const a0 = hexVertexAngle(i);
+        const a1 = hexVertexAngle((i + 1) % 6);
+        addEdge(
+          hx + cell * Math.cos(a0),
+          hy + cell * Math.sin(a0),
+          hx + cell * Math.cos(a1),
+          hy + cell * Math.sin(a1),
+        );
+      }
+    }
+  }
+
+  return { path, edges };
+}
+
+/** In-place ember flicker (no fall) — same rate as dustScene streams. */
+function flickerEdgeChars(chars: Uint16Array): void {
+  for (let i = 0; i < chars.length; i += 1) {
+    if (Math.random() < MESH_EMBER_FLICKER) {
+      chars[i] = randomEmberCharIndex();
+    }
+  }
+}
+
+/**
+ * 0 → solid mesh snakes; 1 → full ember character rows.
+ * Triggers only once the inner mesh snakes dominate the screen.
+ */
+function meshEmberMorph(zoom: number): number {
+  const snakePx = MESH_SNAKE_WIDTH_PX * zoom;
+  return Math.min(
+    1,
+    Math.max(
+      0,
+      (snakePx - MESH_EMBER_MORPH_START_PX) /
+        (MESH_EMBER_MORPH_FULL_PX - MESH_EMBER_MORPH_START_PX),
+    ),
+  );
+}
+
+/** Pre-rasterized glyphs — drawImage is far cheaper than fillText under zoom. */
+function createEmberAtlas(fill: string): EmberAtlas {
+  const cols = EMBER_ATLAS_COLS;
+  const cell = EMBER_ATLAS_CELL;
+  const rows = Math.ceil(EMBER_CHARACTERS.length / cols);
+  const canvas = document.createElement("canvas");
+  canvas.width = cols * cell;
+  canvas.height = rows * cell;
+  const c = canvas.getContext("2d");
+  if (c) {
+    c.clearRect(0, 0, canvas.width, canvas.height);
+    c.fillStyle = fill;
+    c.textAlign = "center";
+    c.textBaseline = "middle";
+    c.font = `700 ${Math.floor(cell * 0.62)}px ${EMBER_FONT_STACK}`;
+    for (let i = 0; i < EMBER_CHARACTERS.length; i += 1) {
+      const col = i % cols;
+      const row = (i / cols) | 0;
+      c.fillText(
+        EMBER_CHARACTERS[i],
+        col * cell + cell * 0.5,
+        row * cell + cell * 0.5 + cell * 0.04,
+      );
+    }
+  }
+  return { canvas, cell, cols };
+}
+
+function worldToScreen(
+  wx: number,
+  wy: number,
+  cx: number,
+  cy: number,
+  zoom: number,
+  width: number,
+  height: number,
+): Vec {
+  return {
+    x: (wx - cx) * zoom + width * 0.5,
+    y: (wy - cy) * zoom + height * 0.5,
+  };
+}
+
+/** Unique corridor runs as continuous polylines (not one subpath per edge). */
+function buildUniqueLaserPath(
+  snakes: Snake[],
+  settled: boolean,
+  t: number,
+  sample: Vec,
+): Path2D {
+  const path = new Path2D();
+  const seen = new Set<string>();
+  const tip = { x: 0, y: 0 };
+
+  for (const snake of snakes) {
+    let headDist: number;
+    if (settled) {
+      headDist = snake.total;
+    } else {
+      const local = (t - snake.delay) / snake.duration;
+      if (local <= 0) continue;
+      const p = local >= 1 ? 1 : easeInOutCubic(local);
+      headDist = p * snake.total;
+    }
+    const tailDist = Math.max(0, headDist - SNAKE_LEN_PX);
+    if (headDist <= 0.01) continue;
+
+    const { xs, ys, cum } = snake;
+    sampleAt(snake, tailDist, sample);
+    let prevX = sample.x;
+    let prevY = sample.y;
+    let inRun = false;
+
+    let i = 1;
+    while (i < cum.length && cum[i] < tailDist) i += 1;
+    for (; i < cum.length && cum[i] <= headDist; i += 1) {
+      inRun = appendUniqueRun(
+        path,
+        seen,
+        prevX,
+        prevY,
+        xs[i],
+        ys[i],
+        inRun,
+      );
+      prevX = xs[i];
+      prevY = ys[i];
+    }
+    sampleAt(snake, headDist, tip);
+    appendUniqueRun(path, seen, prevX, prevY, tip.x, tip.y, inRun);
+  }
+
+  return path;
+}
+
+/** @returns whether a continuous run is active after this edge */
+function appendUniqueRun(
+  path: Path2D,
+  seen: Set<string>,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  inRun: boolean,
+): boolean {
+  if (Math.hypot(x1 - x0, y1 - y0) < 0.05) return inRun;
+  const q = 4;
+  const a0 = Math.round(x0 * q);
+  const b0 = Math.round(y0 * q);
+  const a1 = Math.round(x1 * q);
+  const b1 = Math.round(y1 * q);
+  const key =
+    a0 < a1 || (a0 === a1 && b0 <= b1)
+      ? `${a0},${b0}:${a1},${b1}`
+      : `${a1},${b1}:${a0},${b0}`;
+  if (seen.has(key)) return false;
+  seen.add(key);
+  if (!inRun) path.moveTo(x0, y0);
+  path.lineTo(x1, y1);
+  return true;
+}
+
+function cameraZoom(t: number, zoomMax: number, zoomEmber: number): number {
+  if (t < ZOOM_START_MS) return 1;
+
+  const emberZ = Math.min(zoomEmber, zoomMax);
+
+  // Ease into ember framing, then hold (page reveals underneath).
+  if (t < EMBER_HOLD_START_MS) {
+    const p = Math.min(1, (t - ZOOM_START_MS) / ZOOM_IN_MS);
+    return 1 + (emberZ - 1) * easeInOutCubic(p);
+  }
+
+  return emberZ;
+}
+
+/**
+ * 0 while zooming into the ember mesh; then a slow 0→1 clear of the canvas fill.
+ * Embers stay drawn — only the blackish cover goes away.
+ */
+function pageRevealAmount(t: number): number {
+  if (t < BG_FADE_START_MS) return 0;
+  const p = Math.min(1, (t - BG_FADE_START_MS) / BG_FADE_MS);
+  return easeInOutCubic(p);
+}
+
+/** After the bg is clear, ease remaining mesh/ember graphics out. */
+function graphicsFadeAmount(t: number): number {
+  if (t < FADE_START_MS) return 1;
+  const p = Math.min(1, (t - FADE_START_MS) / FADE_MS);
+  return 1 - easeInOutCubic(p);
+}
+
+/** Zoom level where the center hex roughly fills the viewport. */
+function zoomHexFill(width: number, height: number): number {
+  return Math.min(width, height) / (2 * HEX_SIZE_PX);
+}
+
+/** Drop hex cells that no longer intersect the viewport under the current zoom. */
+function cullVisibleCells(
+  cells: HexCell[],
+  center: HexCell,
+  zoom: number,
+  width: number,
+  height: number,
+): HexCell[] {
+  if (zoom >= zoomHexFill(width, height) * 1.05) return [center];
+
+  const margin = HEX_SIZE_PX * zoom * 1.4;
+  const next: HexCell[] = [];
+  for (const cell of cells) {
+    if (cell === center) {
+      next.push(cell);
+      continue;
+    }
+    const sx = (cell.x - center.x) * zoom + width * 0.5;
+    const sy = (cell.y - center.y) * zoom + height * 0.5;
+    if (
+      sx >= -margin &&
+      sx <= width + margin &&
+      sy >= -margin &&
+      sy <= height + margin
+    ) {
+      next.push(cell);
+    }
+  }
+  return next;
+}
+
 function drawFrame(
   ctx: CanvasRenderingContext2D,
   args: {
@@ -599,71 +1125,446 @@ function drawFrame(
     width: number;
     height: number;
     bg: string;
+    bgRgb: [number, number, number];
     accent: string;
     accentRgb: [number, number, number];
     cells: HexCell[];
     center: HexCell;
     snakes: Snake[];
+    mesh: CenterMesh;
+    emberAtlas: EmberAtlas;
+    settledSnakes: Path2D | null;
+    zoomMax: number;
+    zoomEmber: number;
+    pageReveal: number;
+    graphicsFade: number;
     sample: Vec;
   },
 ): void {
-  const { t, width, height, bg, accent, accentRgb, cells, center, snakes, sample } =
-    args;
+  const {
+    t,
+    width,
+    height,
+    bgRgb,
+    accentRgb,
+    cells,
+    center,
+    snakes,
+    mesh,
+    emberAtlas,
+    settledSnakes,
+    zoomMax,
+    zoomEmber,
+    pageReveal,
+    graphicsFade,
+    sample,
+  } = args;
 
-  ctx.fillStyle = bg;
-  ctx.fillRect(0, 0, width, height);
+  const zoom = cameraZoom(t, zoomMax, zoomEmber);
+  const emberMorph = meshEmberMorph(zoom);
+  const hexFillZ = zoomHexFill(width, height);
+  // Drop outer content before extreme scale makes laser multi-pass expensive.
+  const outerFade = Math.min(
+    1,
+    Math.max(0, 1 - (zoom / Math.max(hexFillZ * 0.85, 1) - 1) / 0.55),
+  );
+  const outerAlpha = Math.min(1 - emberMorph, outerFade) * graphicsFade;
+  // Blackish canvas cover — fades to transparent after the ember mesh fills the screen.
+  const bgAlpha = Math.max(0, 1 - pageReveal);
 
-  for (const cell of cells) {
-    if (cell === center && t >= TRAVEL_MS) continue;
-    ctx.fillStyle = hexFillColor(cell.tint);
-    traceHex(ctx, cell.x, cell.y, HEX_SIZE_PX);
-    ctx.fill();
+  ctx.clearRect(0, 0, width, height);
+  if (bgAlpha > 0.01) {
+    ctx.fillStyle = `rgba(${bgRgb[0]},${bgRgb[1]},${bgRgb[2]},${bgAlpha.toFixed(3)})`;
+    ctx.fillRect(0, 0, width, height);
   }
 
-  const [ar, ag, ab] = accentRgb;
-  const halfW = SNAKE_WIDTH_PX * 0.5;
-  for (const snake of snakes) {
-    const local = (t - snake.delay) / snake.duration;
-    const p = local <= 0 ? 0 : local >= 1 ? 1 : easeInOutCubic(local);
-    const head = p * snake.total;
-    const tail = head - SNAKE_LEN_PX;
-    const step = 1.35;
-    for (let d = 0; d <= SNAKE_LEN_PX; d += step) {
-      const s = head - d;
-      if (s < tail || s < 0) break;
-      sampleAt(snake, s, sample);
-      const fade = 1 - d / SNAKE_LEN_PX;
-      ctx.fillStyle = `rgba(${ar},${ag},${ab},${(0.12 + fade * 0.88).toFixed(3)})`;
-      ctx.beginPath();
-      ctx.arc(sample.x, sample.y, halfW, 0, Math.PI * 2);
+  // Outer hexes + lasers under camera scale — only while still on-screen / cheap.
+  if (outerAlpha > 0.01 && zoom < hexFillZ * 1.35) {
+    ctx.save();
+    ctx.translate(width * 0.5, height * 0.5);
+    ctx.scale(zoom, zoom);
+    ctx.translate(-center.x, -center.y);
+    ctx.globalAlpha = outerAlpha;
+
+    for (const cell of cells) {
+      if (cell === center && t >= TRAVEL_MS) continue;
+      ctx.fillStyle = hexFillColor(cell.tint);
+      traceHex(ctx, cell.x, cell.y, HEX_SIZE_PX);
       ctx.fill();
+    }
+
+    if (settledSnakes && t >= TRAVEL_MS) {
+      // Fewer glow passes once zoomed — full bloom under scale is costly.
+      strokeLaserPath(
+        ctx,
+        settledSnakes,
+        accentRgb,
+        SNAKE_WIDTH_PX,
+        1,
+        zoom > 2.5 ? 2 : 6,
+      );
+    } else {
+      const lasers = buildUniqueLaserPath(snakes, false, t, sample);
+      strokeLaserPath(ctx, lasers, accentRgb, SNAKE_WIDTH_PX, 1, 6);
+    }
+
+    ctx.restore();
+  }
+
+  // Mesh + embers in *screen space* (no ctx.scale) so deep zoom stays cheap.
+  if (t >= TRAVEL_MS - 180 && graphicsFade > 0.01) {
+    const meshAlpha =
+      (t >= TRAVEL_MS
+        ? 1
+        : Math.max(0, (t - (TRAVEL_MS - 180)) / 180)) * graphicsFade;
+    drawCenterMesh(
+      ctx,
+      mesh,
+      emberAtlas,
+      center,
+      bgRgb,
+      accentRgb,
+      meshAlpha,
+      emberMorph,
+      pageReveal,
+      zoom,
+      width,
+      height,
+    );
+  }
+}
+
+/** Multi-pass laser look on a Path2D of unique edges. */
+function strokeLaserPath(
+  ctx: CanvasRenderingContext2D,
+  path: Path2D,
+  accentRgb: [number, number, number],
+  width: number,
+  alpha: number,
+  passes = 6,
+): void {
+  paintLaserPasses(ctx, path, accentRgb, width, alpha, passes);
+}
+
+/**
+ * Wide soft haze with butt caps (avoids round-cap circles) + thin readable core.
+ * Unique edges are stroked once so merges don't stack brightness.
+ */
+function paintLaserPasses(
+  ctx: CanvasRenderingContext2D,
+  path: Path2D,
+  accentRgb: [number, number, number],
+  width: number,
+  alpha: number,
+  passes: number,
+): void {
+  const [ar, ag, ab] = accentRgb;
+  const midR = Math.min(255, Math.floor(ar * 1.08 + 10));
+  const midG = Math.min(255, Math.floor(ag * 1.04 + 5));
+  const midB = Math.min(255, Math.floor(ab * 1.04 + 5));
+  const coreR = Math.min(255, Math.floor(ar * 1.15 + 14));
+  const coreG = Math.min(255, Math.floor(ag * 1.08 + 6));
+  const coreB = Math.min(255, Math.floor(ab * 1.08 + 6));
+
+  ctx.save();
+  ctx.lineJoin = "round";
+  ctx.shadowBlur = 0;
+  ctx.globalCompositeOperation = "source-over";
+
+  if (passes >= 6) {
+    ctx.lineCap = "butt";
+    ctx.strokeStyle = `rgba(${ar},${ag},${ab},${(0.016 * alpha).toFixed(3)})`;
+    ctx.lineWidth = width * 28;
+    ctx.stroke(path);
+
+    ctx.strokeStyle = `rgba(${ar},${ag},${ab},${(0.028 * alpha).toFixed(3)})`;
+    ctx.lineWidth = width * 16;
+    ctx.stroke(path);
+
+    ctx.strokeStyle = `rgba(${ar},${ag},${ab},${(0.05 * alpha).toFixed(3)})`;
+    ctx.lineWidth = width * 8;
+    ctx.stroke(path);
+
+    ctx.strokeStyle = `rgba(${ar},${ag},${ab},${(0.1 * alpha).toFixed(3)})`;
+    ctx.lineWidth = width * 3.5;
+    ctx.stroke(path);
+  } else if (passes >= 2) {
+    ctx.lineCap = "butt";
+    ctx.strokeStyle = `rgba(${ar},${ag},${ab},${(0.06 * alpha).toFixed(3)})`;
+    ctx.lineWidth = width * 6;
+    ctx.stroke(path);
+  }
+
+  ctx.lineCap = "round";
+  ctx.strokeStyle = `rgba(${midR},${midG},${midB},${(0.8 * alpha).toFixed(3)})`;
+  ctx.lineWidth = width * 1.1;
+  ctx.stroke(path);
+
+  ctx.strokeStyle = `rgba(${coreR},${coreG},${coreB},${(0.92 * alpha).toFixed(3)})`;
+  ctx.lineWidth = width * 0.5;
+  ctx.stroke(path);
+
+  ctx.restore();
+}
+
+/**
+ * Draw mesh layers in screen space: only visible edges, no ctx.scale.
+ * Front mesh layers morph into ember glyphs; a hex border separates lasers.
+ */
+function drawCenterMesh(
+  ctx: CanvasRenderingContext2D,
+  mesh: CenterMesh,
+  atlas: EmberAtlas,
+  center: HexCell,
+  bgRgb: [number, number, number],
+  accentRgb: [number, number, number],
+  alpha: number,
+  emberMorph: number,
+  pageReveal: number,
+  zoom: number,
+  width: number,
+  height: number,
+): void {
+  if (alpha < 0.01) return;
+  const [ar, ag, ab] = accentRgb;
+  const [br, bgc, bb] = bgRgb;
+  const last = MESH_LAYERS - 1;
+  const firstEmberLayer = Math.max(0, MESH_LAYERS - MESH_EMBER_LAYERS);
+  const { x: cx, y: cy } = center;
+  const cell = mesh.cell;
+  const strokeAlpha = alpha * (1 - emberMorph);
+  const emberAlpha = alpha * emberMorph;
+  const lineW = MESH_SNAKE_WIDTH_PX * zoom;
+  const fontPx = (MESH_SNAKE_WIDTH_PX / 5.4) * zoom + MESH_EMBER_FONT_EXTRA_PX;
+  const lineSpan = MESH_SNAKE_WIDTH_PX * 0.82;
+  const margin = lineW * 2 + MESH_CELL_PX * zoom;
+  const meshBgAlpha = alpha * Math.max(0, 1 - pageReveal);
+
+  const hexPath = new Path2D();
+  for (let i = 0; i < 6; i += 1) {
+    const a = hexVertexAngle(i);
+    const p = worldToScreen(
+      cx + HEX_SIZE_PX * Math.cos(a),
+      cy + HEX_SIZE_PX * Math.sin(a),
+      cx,
+      cy,
+      zoom,
+      width,
+      height,
+    );
+    if (i === 0) hexPath.moveTo(p.x, p.y);
+    else hexPath.lineTo(p.x, p.y);
+  }
+  hexPath.closePath();
+
+  ctx.save();
+
+  // Clip slightly inside so the border stroke stays crisp on top.
+  ctx.beginPath();
+  for (let i = 0; i < 6; i += 1) {
+    const a = hexVertexAngle(i);
+    const p = worldToScreen(
+      cx + HEX_SIZE_PX * 0.992 * Math.cos(a),
+      cy + HEX_SIZE_PX * 0.992 * Math.sin(a),
+      cx,
+      cy,
+      zoom,
+      width,
+      height,
+    );
+    if (i === 0) ctx.moveTo(p.x, p.y);
+    else ctx.lineTo(p.x, p.y);
+  }
+  ctx.closePath();
+  ctx.clip();
+
+  if (meshBgAlpha > 0.01) {
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = `rgba(${br},${bgc},${bb},${meshBgAlpha.toFixed(3)})`;
+    ctx.fill(hexPath);
+  }
+
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.shadowBlur = 0;
+
+  // Scratch for visible screen-space segments (reused per layer).
+  const visEdges: MeshEdgeEmber[] = [];
+  const visX0: number[] = [];
+  const visY0: number[] = [];
+  const visX1: number[] = [];
+  const visY1: number[] = [];
+
+  for (let L = 0; L < MESH_LAYERS; L += 1) {
+    const depth = last <= 0 ? 1 : L / last;
+    const shade = 0.34 + 0.66 * depth;
+    const layerAng = MESH_LAYER_ANGLES[L] ?? 0;
+    const cosL = Math.cos(layerAng);
+    const sinL = Math.sin(layerAng);
+    const off = MESH_LAYER_OFFSETS[L] ?? { x: 0, y: 0 };
+    const ox = off.x * cell;
+    const oy = off.y * cell;
+    const strokeCol = `rgb(${Math.floor(ar * shade)},${Math.floor(ag * shade)},${Math.floor(ab * shade)})`;
+    const useEmbers = L >= firstEmberLayer;
+
+    visEdges.length = 0;
+    visX0.length = 0;
+    visY0.length = 0;
+    visX1.length = 0;
+    visY1.length = 0;
+
+    for (const edge of mesh.edges) {
+      // Inline layer transform (cached sin/cos).
+      const dx0 = edge.x0 - cx;
+      const dy0 = edge.y0 - cy;
+      const dx1 = edge.x1 - cx;
+      const dy1 = edge.y1 - cy;
+      const wx0 = cx + ox + dx0 * cosL - dy0 * sinL;
+      const wy0 = cy + oy + dx0 * sinL + dy0 * cosL;
+      const wx1 = cx + ox + dx1 * cosL - dy1 * sinL;
+      const wy1 = cy + oy + dx1 * sinL + dy1 * cosL;
+      const saX = (wx0 - cx) * zoom + width * 0.5;
+      const saY = (wy0 - cy) * zoom + height * 0.5;
+      const sbX = (wx1 - cx) * zoom + width * 0.5;
+      const sbY = (wy1 - cy) * zoom + height * 0.5;
+      if (
+        (saX < -margin && sbX < -margin) ||
+        (saX > width + margin && sbX > width + margin) ||
+        (saY < -margin && sbY < -margin) ||
+        (saY > height + margin && sbY > height + margin)
+      ) {
+        continue;
+      }
+      visEdges.push(edge);
+      visX0.push(saX);
+      visY0.push(saY);
+      visX1.push(sbX);
+      visY1.push(sbY);
+    }
+
+    // Ember layers drop the solid stroke once characters dominate.
+    const layerStroke =
+      useEmbers && emberAlpha > 0.72 ? 0 : strokeAlpha;
+    if (layerStroke > 0.01 && visEdges.length > 0) {
+      ctx.globalAlpha = layerStroke;
+      ctx.strokeStyle = strokeCol;
+      ctx.lineWidth = lineW * (0.86 + 0.16 * depth);
+      const path = new Path2D();
+      for (let i = 0; i < visEdges.length; i += 1) {
+        path.moveTo(visX0[i], visY0[i]);
+        path.lineTo(visX1[i], visY1[i]);
+      }
+      ctx.stroke(path);
+    }
+
+    if (useEmbers && emberAlpha > 0.01 && fontPx >= 4 && visEdges.length > 0) {
+      ctx.globalAlpha = emberAlpha * (0.55 + 0.45 * depth);
+      drawMeshEmbersScreen(
+        ctx,
+        visEdges,
+        visX0,
+        visY0,
+        visX1,
+        visY1,
+        atlas,
+        fontPx,
+        lineSpan * zoom,
+        width,
+        height,
+        // Flicker once on the front-most ember layer only.
+        L === last,
+      );
     }
   }
 
-  if (t >= TRAVEL_MS) {
-    const ignite = t - TRAVEL_MS;
-    const pulseT = Math.min(1, ignite / 380);
-    const pulse = Math.sin(pulseT * Math.PI);
-    const glowR = HEX_SIZE_PX * (2.4 + pulse * 1.4);
-    const grad = ctx.createRadialGradient(
-      center.x,
-      center.y,
-      HEX_SIZE_PX * 0.2,
-      center.x,
-      center.y,
-      glowR,
-    );
-    grad.addColorStop(0, `rgba(${ar},${ag},${ab},${0.55 + pulse * 0.35})`);
-    grad.addColorStop(0.45, `rgba(${ar},${ag},${ab},${0.18 + pulse * 0.12})`);
-    grad.addColorStop(1, `rgba(${ar},${ag},${ab},0)`);
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.arc(center.x, center.y, glowR, 0, Math.PI * 2);
-    ctx.fill();
+  ctx.restore();
 
-    const scale = 1 + 0.16 * pulse;
-    ctx.fillStyle = accent;
-    traceHex(ctx, center.x, center.y, HEX_SIZE_PX * scale);
-    ctx.fill();
+  // 4px screen-space border between outer lasers and the interior mesh.
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  ctx.strokeStyle = `rgb(${ar},${ag},${ab})`;
+  ctx.lineWidth = CENTER_HEX_BORDER_PX;
+  ctx.stroke(hexPath);
+  ctx.restore();
+}
+
+function drawMeshEmbersScreen(
+  ctx: CanvasRenderingContext2D,
+  edges: MeshEdgeEmber[],
+  sx0: number[],
+  sy0: number[],
+  sx1: number[],
+  sy1: number[],
+  atlas: EmberAtlas,
+  fontPx: number,
+  spanPx: number,
+  width: number,
+  height: number,
+  flicker: boolean,
+): void {
+  const { canvas, cell: atlasCell, cols } = atlas;
+  const half = fontPx * 0.5;
+  const src = atlasCell;
+  // When the whole hex is still on-screen, thin the glyph density.
+  const slotStep = edges.length > 160 ? 2 : 1;
+
+  for (let e = 0; e < edges.length; e += 1) {
+    const edge = edges[e];
+    if (flicker) flickerEdgeChars(edge.chars);
+
+    const x0 = sx0[e];
+    const y0 = sy0[e];
+    const sdx = sx1[e] - x0;
+    const sdy = sy1[e] - y0;
+    const slen = Math.hypot(sdx, sdy) || 1;
+    const snx = -sdy / slen;
+    const sny = sdx / slen;
+    const ang = Math.atan2(sdy, sdx);
+    const ux = sdx / slen;
+    const uy = sdy / slen;
+    const { slots, chars } = edge;
+
+    for (let line = 0; line < MESH_EMBER_LINES; line += 1) {
+      const tLine =
+        MESH_EMBER_LINES <= 1 ? 0 : line / (MESH_EMBER_LINES - 1);
+      const off = (tLine - 0.5) * spanPx;
+      const base = line * slots;
+      const ox = snx * off;
+      const oy = sny * off;
+
+      ctx.save();
+      ctx.translate(x0 + ox, y0 + oy);
+      ctx.rotate(ang);
+      for (let s = 0; s < slots; s += slotStep) {
+        const u = slots === 1 ? 0.5 : (s + 0.5) / slots;
+        const gx = u * slen;
+        const wx = x0 + ox + ux * gx;
+        const wy = y0 + oy + uy * gx;
+        if (
+          wx < -fontPx ||
+          wx > width + fontPx ||
+          wy < -fontPx ||
+          wy > height + fontPx
+        ) {
+          continue;
+        }
+
+        const ch = chars[base + s] ?? 0;
+        ctx.drawImage(
+          canvas,
+          (ch % cols) * src,
+          ((ch / cols) | 0) * src,
+          src,
+          src,
+          gx - half,
+          -half,
+          fontPx,
+          fontPx,
+        );
+      }
+      ctx.restore();
+    }
   }
 }

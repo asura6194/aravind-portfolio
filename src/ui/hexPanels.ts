@@ -13,7 +13,7 @@ import {
 const PANEL_SELECTOR = ".hex-panel";
 
 /** Wave band width in hex cells. Try 3–5. */
-const WAVE_WIDTH_HEX = 10;
+const WAVE_WIDTH_HEX = 12;
 
 /** Wave travel speed in pixels per second. */
 const WAVE_SPEED_PX = 160;
