@@ -47,6 +47,10 @@ const TOTAL_MS = FADE_START_MS + FADE_MS;
 const SNAKE_LEN_PX = 100;
 const MAX_STAGGER_MS = 380;
 const NODE_QUANT = 10;
+/** Outer hex rings (from the screen edge) charged with laser color at start. */
+const EDGE_CHARGE_LAYERS = 5;
+/** How quickly a charged hex finishes draining once its snake tail has passed. */
+const EDGE_DRAIN_PER_FRAME = 0.45;
 
 /**
  * Fine hex lattice inside the center cell. Thin snakes (~1/12 outer width)
@@ -86,7 +90,7 @@ const MESH_EMBER_FLICKER = 0.08;
 const MESH_EMBER_MORPH_START_PX = 18;
 const MESH_EMBER_MORPH_FULL_PX = 38;
 /** Screen-space border between outer lasers and the center mesh. */
-const CENTER_HEX_BORDER_PX = 24;
+const CENTER_HEX_BORDER_PX = 18;
 /** Extra glyph size on the loading mesh embers only (not dustScene). */
 const MESH_EMBER_FONT_EXTRA_PX = 4;
 /** How many front mesh layers morph into ember characters. */
@@ -118,6 +122,15 @@ type HexCell = {
   x: number;
   y: number;
   tint: number;
+  /** 0..EDGE_CHARGE_LAYERS-1 if in the charged outer ring, else -1. */
+  edgeLayer: number;
+  /** 0 = full laser charge, 1 = drained to base fill. */
+  drain: number;
+  /**
+   * Snakes whose paths pass this hex, with the path distance at contact.
+   * Drains once any listed snake's tail moves past its distance.
+   */
+  passList: Array<{ s: number; d: number }> | null;
 };
 
 /** One mesh snake edge with 5 parallel ember rows (chars swap in place). */
@@ -211,6 +224,7 @@ export function setupLoadingScreen(): Promise<void> {
     const center = pickCenterHex(cells, width, height);
     const { nodes, goals, hexVerts } = buildGapGraph(width, height, center);
     const snakes = spawnSnakes(nodes, goals, hexVerts, cells, center);
+    bindEdgeDrainToSnakes(cells, snakes);
     const mesh = buildCenterMesh(center);
     const emberAtlas = createEmberAtlas(accent);
 
@@ -353,17 +367,158 @@ function buildCells(width: number, height: number): HexCell[] {
     for (let col = -1; col < cols; col += 1) {
       const { x, y } = loadingHexCenter(col, row);
       if (!hexFits(x, y, HEX_SIZE_PX, width, height, 0)) continue;
-      cells.push({ col, row, x, y, tint: hexTint(col, row) });
+      cells.push({
+        col,
+        row,
+        x,
+        y,
+        tint: hexTint(col, row),
+        edgeLayer: -1,
+        drain: 0,
+        passList: null,
+      });
     }
   }
+  markEdgeChargeLayers(cells, width, height);
   return cells;
+}
+
+/** Tag hexes in the outer N rings measured from the viewport edge. */
+function markEdgeChargeLayers(
+  cells: HexCell[],
+  width: number,
+  height: number,
+): void {
+  const pitch = (LOADING_COL_W + LOADING_ROW_H) * 0.5;
+  for (const cell of cells) {
+    const dist = Math.min(
+      cell.x,
+      cell.y,
+      width - cell.x,
+      height - cell.y,
+    );
+    const layer = Math.floor(Math.max(0, dist) / Math.max(pitch, 0.0001));
+    cell.edgeLayer = layer < EDGE_CHARGE_LAYERS ? layer : -1;
+    cell.drain = 0;
+    cell.passList = null;
+  }
+}
+
+/**
+ * Bind each charged edge hex to nearby snake paths.
+ * When any bound snake's tail moves past the contact distance, the hex drains.
+ */
+function bindEdgeDrainToSnakes(cells: HexCell[], snakes: Snake[]): void {
+  // Hex centers sit off the gap-lattice paths — reach across a couple cells.
+  const radius =
+    Math.max(LOADING_COL_W, LOADING_ROW_H) * 1.85 + HEX_SIZE_PX;
+  const r2 = radius * radius;
+
+  for (const cell of cells) {
+    if (cell.edgeLayer < 0) continue;
+    const hits: Array<{ s: number; d: number }> = [];
+
+    for (let s = 0; s < snakes.length; s += 1) {
+      const { xs, ys, cum } = snakes[s];
+      let best = Infinity;
+
+      for (let i = 0; i < xs.length; i += 1) {
+        const dx = cell.x - xs[i];
+        const dy = cell.y - ys[i];
+        if (dx * dx + dy * dy > r2) continue;
+        if (cum[i] < best) best = cum[i];
+      }
+      for (let i = 1; i < xs.length; i += 1) {
+        const mx = (xs[i - 1] + xs[i]) * 0.5;
+        const my = (ys[i - 1] + ys[i]) * 0.5;
+        const dx = cell.x - mx;
+        const dy = cell.y - my;
+        if (dx * dx + dy * dy > r2) continue;
+        const midCum = (cum[i - 1] + cum[i]) * 0.5;
+        if (midCum < best) best = midCum;
+      }
+
+      if (best < Infinity) hits.push({ s, d: best });
+    }
+
+    cell.passList = hits.length > 0 ? hits : null;
+  }
+}
+
+/**
+ * Drain charged hexes once any bound snake's tail has moved past them.
+ */
+function updateEdgeDrain(cells: HexCell[], snakes: Snake[], t: number): void {
+  if (t >= TRAVEL_MS) {
+    for (const cell of cells) {
+      if (cell.edgeLayer >= 0) cell.drain = 1;
+    }
+    return;
+  }
+
+  const tailDists = new Float32Array(snakes.length);
+  for (let s = 0; s < snakes.length; s += 1) {
+    const snake = snakes[s];
+    const local = (t - snake.delay) / snake.duration;
+    if (local <= 0) {
+      tailDists[s] = -1;
+      continue;
+    }
+    const p = local >= 1 ? 1 : easeInOutCubic(local);
+    const headDist = p * snake.total;
+    tailDists[s] = Math.max(0, headDist - SNAKE_LEN_PX);
+  }
+
+  for (const cell of cells) {
+    if (cell.edgeLayer < 0 || cell.drain >= 1) continue;
+    const list = cell.passList;
+    if (!list) continue;
+
+    let passed = false;
+    for (let i = 0; i < list.length; i += 1) {
+      const { s, d } = list[i];
+      const tailDist = tailDists[s];
+      // Strictly past: spawn hexes (d≈0) wait until the tail starts moving.
+      if (tailDist > d) {
+        passed = true;
+        break;
+      }
+    }
+    if (!passed) continue;
+    cell.drain = Math.min(1, cell.drain + EDGE_DRAIN_PER_FRAME);
+  }
+}
+
+/** Accent-charged edge hex → base fill as drain goes 0→1. */
+function cellFillStyle(
+  cell: HexCell,
+  accentRgb: [number, number, number],
+): string {
+  if (cell.edgeLayer < 0 || cell.drain >= 0.995) {
+    return hexFillColor(cell.tint);
+  }
+  const base = cssToRgb(hexFillColor(cell.tint));
+  const u = cell.drain;
+  const r = Math.round(accentRgb[0] + (base[0] - accentRgb[0]) * u);
+  const g = Math.round(accentRgb[1] + (base[1] - accentRgb[1]) * u);
+  const b = Math.round(accentRgb[2] + (base[2] - accentRgb[2]) * u);
+  return `rgb(${r},${g},${b})`;
 }
 
 function pickCenterHex(cells: HexCell[], width: number, height: number): HexCell {
   const cx = width / 2;
   const cy = height / 2;
   if (cells.length === 0) {
-    return { col: 0, row: 0, x: cx, y: cy, tint: 0 };
+    return {
+      col: 0,
+      row: 0,
+      x: cx,
+      y: cy,
+      tint: 0,
+      edgeLayer: -1,
+      drain: 1,
+      passList: null,
+    };
   }
   let best = cells[0];
   let bestD = Infinity;
@@ -1172,6 +1327,10 @@ function drawFrame(
   // Blackish canvas cover — fades to transparent after the ember mesh fills the screen.
   const bgAlpha = Math.max(0, 1 - pageReveal);
 
+  if (t < TRAVEL_MS + 40) {
+    updateEdgeDrain(cells, snakes, t);
+  }
+
   ctx.clearRect(0, 0, width, height);
   if (bgAlpha > 0.01) {
     ctx.fillStyle = `rgba(${bgRgb[0]},${bgRgb[1]},${bgRgb[2]},${bgAlpha.toFixed(3)})`;
@@ -1188,7 +1347,7 @@ function drawFrame(
 
     for (const cell of cells) {
       if (cell === center && t >= TRAVEL_MS) continue;
-      ctx.fillStyle = hexFillColor(cell.tint);
+      ctx.fillStyle = cellFillStyle(cell, accentRgb);
       traceHex(ctx, cell.x, cell.y, HEX_SIZE_PX);
       ctx.fill();
     }
