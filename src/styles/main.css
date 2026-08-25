@@ -471,9 +471,26 @@ h3 {
 }
 
 .timeline ul {
+  list-style: disc;
+  list-style-position: inside;
   margin: 0;
   padding-left: 1.1rem;
   color: var(--muted);
+}
+
+.timeline ul li::marker {
+  color: var(--accent);
+}
+
+.timeline ul li {
+  position: relative;
+}
+
+.timeline ul li::before {
+  content: "•";
+  position: absolute;
+  left: -1.1rem;
+  color: var(--accent);
 }
 
 .skills-grid {
