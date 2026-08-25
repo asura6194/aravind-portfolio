@@ -68,7 +68,14 @@ const DOLLY_TARGET_FOV = 70;
 const DOLLY_FILL_MARGIN = 0.92;
 const DOLLY_DIST_EASE_POWER = 2;
 const DOLLY_FOV_EASE_POWER = 6;
-const DOLLY_WASH_START = 0.65;
+/**
+ * Second push once the FOV-warp dolly zoom lands: FOV stays fixed here (only
+ * distance keeps closing), so the footprint only keeps shrinking — no need
+ * to re-check it against the grid bounds. This is what actually gets the
+ * hex to dominate the frame; a smaller margin means a closer final distance.
+ */
+const PUNCH_FILL_MARGIN = 0.7;
+const PUNCH_DURATION = 0.5;
 /**
  * Reveal transition once the dolly zoom's colour wash covers the screen: the
  * real page (already sitting hidden underneath the loader the whole time)
@@ -77,8 +84,15 @@ const DOLLY_WASH_START = 0.65;
  * wash fades away over the same stretch.
  */
 const REVEAL_START_SCALE = 34;
-const REVEAL_DURATION = 1.6;
-const REVEAL_WASH_CLEAR_SCALE = 4;
+const REVEAL_DURATION = 2.3;
+/**
+ * The wash stays opaque until the page has zoomed back down to nearly this
+ * scale before fading. At high magnification even a couple of pixels of
+ * anchor imprecision (font antialiasing, glyph metrics) reads as an obvious
+ * colour mismatch once blown up 30-plus times; holding the flat wash colour
+ * until we're much closer to natural size keeps that imprecision invisible.
+ */
+const REVEAL_WASH_CLEAR_SCALE = 1.6;
 /**
  * Bloom strength is derived from the wave intensity rather than being its own
  * slider — both fed the same perceived brightness, so one knob now drives the
@@ -199,6 +213,8 @@ export function setupLoadingScreen(): Promise<void> {
       revealTween?.kill();
       document.body.style.transform = "";
       document.body.style.transformOrigin = "";
+      document.documentElement.style.overflow = "";
+      document.body.style.pointerEvents = "";
       removeListeners?.();
       foundation?.dispose();
       foundation = null;
@@ -237,6 +253,11 @@ export function setupLoadingScreen(): Promise<void> {
       document.documentElement.appendChild(overlay);
       document.documentElement.classList.remove("is-loading");
       document.body.classList.remove("is-loading");
+      // The is-loading class also gated scroll/pointer-events; removing it
+      // reveals the real DOM, so re-lock both by hand until the zoom-out
+      // settles — otherwise the page can be scrolled or clicked mid-flight.
+      document.documentElement.style.overflow = "hidden";
+      document.body.style.pointerEvents = "none";
 
       const anchor =
         document.querySelector<HTMLElement>(".logo-r") ??
@@ -272,7 +293,18 @@ export function setupLoadingScreen(): Promise<void> {
 
       // Push straight down the current viewing ray while widening the FOV —
       // a dolly zoom — until the centre hex's world-space radius fills the
-      // viewport at the new, much closer distance.
+      // viewport at the new, much closer distance. The camera also swings
+      // around the hex (azimuth) over the combined zoom-in, split between
+      // this stage and the punch-in below in proportion to their durations.
+      //
+      // placeIsometricCamera pads the distance by up to 8 units on wide
+      // viewports to keep the intro shot framed on ultra-wide monitors — far
+      // bigger than the sub-1-unit distances targeted below, so from here on
+      // every render call skips that padding. distStart captures the actual
+      // distance the camera was already sitting at (padding included) so the
+      // switch doesn't cause a visible pop.
+      const wideAspect = Math.max(1, window.innerWidth) / Math.max(1, window.innerHeight);
+      const padAtStart = Math.max(0, wideAspect - 1) * 8;
       const hexRadius = Math.max(0.05, params.centerHexEdge - params.hexGap / SQRT3);
       const fovEndRad = (DOLLY_TARGET_FOV * Math.PI) / 180;
       const distEnd = Math.max(
@@ -280,13 +312,18 @@ export function setupLoadingScreen(): Promise<void> {
         (hexRadius * DOLLY_FILL_MARGIN) / Math.tan(fovEndRad / 2),
       );
 
-      const distStart = params.camDistance;
+      const distStart = params.camDistance + padAtStart;
       const fovStart = params.camFov;
+      const azimStart = params.camAzimuth;
+      const azimEnd = azimStart + 180;
+      const durationA = DOLLY_BASE_DURATION / Math.max(0.1, params.dollySpeed);
+      const durationB = PUNCH_DURATION / Math.max(0.1, params.dollySpeed);
+      const azimAtHandoff = azimStart + 180 * (durationA / (durationA + durationB));
+
       const proxy = { t: 0 };
-      const duration = DOLLY_BASE_DURATION / Math.max(0.1, params.dollySpeed);
       dollyTween = gsap.to(proxy, {
         t: 1,
-        duration,
+        duration: durationA,
         ease: "none",
         onUpdate: () => {
           if (!foundation) return;
@@ -294,16 +331,55 @@ export function setupLoadingScreen(): Promise<void> {
           const fovT = proxy.t ** DOLLY_FOV_EASE_POWER;
           params.camDistance = distStart + (distEnd - distStart) * distT;
           params.camFov = fovStart + (DOLLY_TARGET_FOV - fovStart) * fovT;
+          params.camAzimuth = azimStart + (azimAtHandoff - azimStart) * proxy.t;
           placeIsometricCamera(
             foundation.camera,
             Math.max(1, window.innerWidth),
             Math.max(1, window.innerHeight),
+            true,
           );
-          const washT = Math.max(
-            0,
-            (proxy.t - DOLLY_WASH_START) / (1 - DOLLY_WASH_START),
+        },
+        onComplete: () => {
+          startPunchIn(distEnd, azimAtHandoff, azimEnd);
+        },
+      });
+    };
+
+    const startPunchIn = (
+      distFrom: number,
+      azimFrom: number,
+      azimTo: number,
+    ) => {
+      if (!foundation) return;
+
+      // Continue straight in, FOV fixed, until the hex genuinely dominates
+      // the frame. The colour wash now rides directly on this stage's own
+      // progress — no separate pause-then-flash, it ramps in step with the
+      // hex visibly taking over the viewport.
+      const hexRadius = Math.max(0.05, params.centerHexEdge - params.hexGap / SQRT3);
+      const fovRad = (params.camFov * Math.PI) / 180;
+      const distTo = Math.max(
+        0.05,
+        (hexRadius * PUNCH_FILL_MARGIN) / Math.tan(fovRad / 2),
+      );
+
+      const proxy = { t: 0 };
+      const duration = PUNCH_DURATION / Math.max(0.1, params.dollySpeed);
+      dollyTween = gsap.to(proxy, {
+        t: 1,
+        duration,
+        ease: "power2.in",
+        onUpdate: () => {
+          if (!foundation) return;
+          params.camDistance = distFrom + (distTo - distFrom) * proxy.t;
+          params.camAzimuth = azimFrom + (azimTo - azimFrom) * proxy.t;
+          placeIsometricCamera(
+            foundation.camera,
+            Math.max(1, window.innerWidth),
+            Math.max(1, window.innerHeight),
+            true,
           );
-          colorWash.style.opacity = String(Math.min(1, washT));
+          colorWash.style.opacity = String(proxy.t);
         },
         onComplete: () => {
           startReveal();
@@ -377,10 +453,12 @@ export function setupLoadingScreen(): Promise<void> {
           foundation?.wave.pause();
           elevTween?.pause();
           dollyTween?.pause();
+          revealTween?.pause();
         } else {
           foundation?.wave.resume();
           elevTween?.resume();
           dollyTween?.resume();
+          revealTween?.resume();
         }
         pauseBadge.hidden = !paused;
       };
@@ -819,11 +897,19 @@ function placeIsometricCamera(
   camera: PerspectiveCamera,
   viewW: number,
   viewH: number,
+  skipAspectPad = false,
 ): void {
   const elev = (params.camElevation * Math.PI) / 180;
   const azim = (params.camAzimuth * Math.PI) / 180;
   const aspect = viewW / Math.max(viewH, 1);
-  const dist = params.camDistance + Math.max(0, aspect - 1) * 8;
+  // The wide-viewport padding keeps the intro wave-sweep shot framed on
+  // ultra-wide monitors, but it can be several world units — far bigger than
+  // the sub-1-unit distances the zoom-in stages target, so it's skipped
+  // there entirely rather than fought with a subtraction that would just
+  // clamp back to a much larger distance on any normal 16:9 screen.
+  const dist = skipAspectPad
+    ? params.camDistance
+    : params.camDistance + Math.max(0, aspect - 1) * 8;
 
   const y = Math.sin(elev) * dist;
   const horiz = Math.cos(elev) * dist;

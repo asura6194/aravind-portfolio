@@ -4,9 +4,6 @@ import { fileURLToPath } from "node:url";
 import type { Plugin } from "vite";
 import { defineConfig } from "vite";
 
-<<<<<<< Updated upstream
-export default defineConfig({
-=======
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
 const loaderConfigPath = path.join(rootDir, "src/ui/loadingScreenConfig.ts");
 
@@ -129,8 +126,7 @@ function saveLoaderConfigPlugin(): Plugin {
 export default defineConfig(({ mode }) => ({
   base: mode === "production" ? "/aravind-portfolio/" : "/",
   plugins: [saveLoaderConfigPlugin()],
->>>>>>> Stashed changes
   server: {
     port: 5173,
   },
-});
+}));

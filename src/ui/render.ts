@@ -1,8 +1,7 @@
+import { assetUrl } from "../assetUrl";
 import {
   education,
   experience,
-  featured,
-  GAME_URL,
   profile,
   skills,
   type JobPoint,
@@ -30,13 +29,13 @@ export function renderPage(): void {
     timeline.innerHTML = experience
       .map(
         (job) => `
-        <li>
+        <li class="hex-panel">
           <div class="job-head">
             <div>
               <h3>${escapeHtml(job.role)}</h3>
               <p class="job-meta">${escapeHtml(job.company)} · ${escapeHtml(job.period)} · ${escapeHtml(job.location)}</p>
             </div>
-            <img class="job-logo" src="${escapeHtml(job.logo)}" alt="${escapeHtml(job.logoAlt)}" />
+            <img class="job-logo" src="${escapeHtml(assetUrl(job.logo))}" alt="${escapeHtml(job.logoAlt)}" />
           </div>
           <ul>
             ${job.points.map((point) => renderPoint(point)).join("")}
@@ -51,7 +50,7 @@ export function renderPage(): void {
     skillsRoot.innerHTML = Object.entries(skills)
       .map(
         ([group, items]) => `
-        <article class="skill-group">
+        <article class="skill-group hex-panel">
           <h3>${escapeHtml(group)}</h3>
           <ul class="chips">
             ${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
@@ -67,7 +66,7 @@ export function renderPage(): void {
       <li><a href="mailto:${profile.email}">${escapeHtml(profile.email)}</a></li>
       <li><a href="tel:${profile.phone.replace(/\s+/g, "")}">${escapeHtml(profile.phone)}</a></li>
       <li><a href="${profile.linkedin}" target="_blank" rel="noreferrer">${escapeHtml(profile.linkedinLabel)}</a></li>
-      <li><a href="/Aravind.pdf" download>Download resume (PDF)</a></li>
+      <li><a href="${escapeHtml(assetUrl("Aravind.pdf"))}" download>Download resume (PDF)</a></li>
     `;
   }
 }
