@@ -364,9 +364,9 @@ h3 {
 .about-card,
 .edu-card,
 .featured-card,
-.timeline > li,
+.timeline li,
 .skill-group,
-.contact-card {
+.hex-panel {
   position: relative;
   isolation: isolate;
   overflow: hidden;

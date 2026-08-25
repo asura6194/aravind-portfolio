@@ -1,172 +1,160 @@
-﻿import {
-  HEX_FILL,
-  HEX_HIGHLIGHT,
-  HEX_SIZE_PX,
-  SQRT3,
-  hexFillColor,
-  hexFits,
-  hexTint,
-  hexVertexAngle,
-  readCssColor,
-  traceHex,
-} from "../hex/hexGridConfig";
+﻿import gsap from "gsap";
 import {
-  EMBER_CHARACTERS,
-  EMBER_FONT_STACK,
-  randomEmberCharIndex,
-} from "../embers/emberCharacters";
+  ACESFilmicToneMapping,
+  AmbientLight,
+  type BufferGeometry,
+  Color,
+  DirectionalLight,
+  DynamicDrawUsage,
+  ExtrudeGeometry,
+  Group,
+  InstancedBufferAttribute,
+  HemisphereLight,
+  InstancedMesh,
+  Mesh,
+  MeshPhysicalMaterial,
+  MeshStandardMaterial,
+  Object3D,
+  PMREMGenerator,
+  PerspectiveCamera,
+  PlaneGeometry,
+  Scene,
+  Shape,
+  Vector2,
+  Vector3,
+  WebGLRenderer,
+} from "three";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+import { WAVE_COLOR, isOriginHex } from "./hexLattice";
+import { createWaveSystem, type WaveSystem } from "./loaderWave";
+import {
+  loadingScreenConfig,
+  type LoaderParams,
+  type Vec3,
+} from "./loadingScreenConfig";
 
 /**
- * Gap between hexes on the loading canvas, in pixels.
- * Increase this to space the honeycomb out. Snake width is always 4px smaller.
+ * Loading screen — 3D hexagonal floor plus an inward hex-ring rise wave.
  */
-const LOADING_HEX_GAP_PX = 6;
 
-const LOADING_COL_W = SQRT3 * HEX_SIZE_PX + LOADING_HEX_GAP_PX;
-const LOADING_ROW_H = 1.5 * HEX_SIZE_PX + LOADING_HEX_GAP_PX;
-const LOADING_RING_R = HEX_SIZE_PX + LOADING_HEX_GAP_PX / SQRT3;
-const SNAKE_WIDTH_PX = Math.max(0.5, LOADING_HEX_GAP_PX - 4);
-
-const SNAKE_COUNT = 380;
-const TRAVEL_MS = 2500;
-/** Brief hold after snakes reach the meshed center hex. */
-const HOLD_MS = 280;
-/** Zoom from full grid until mesh snakes become ember character rows. */
-const ZOOM_IN_MS = 3200;
-/** Short settle on the full-screen ember mesh before clearing the canvas bg. */
-const EMBER_HOLD_MS = 150;
-/** Slow fade: canvas blackish fill → transparent over the live page. */
-const BG_FADE_MS = 300;
-/** After bg is clear, ease out remaining ember graphics. */
-const FADE_MS = 1500;
-const ZOOM_START_MS = TRAVEL_MS + HOLD_MS;
-const EMBER_HOLD_START_MS = ZOOM_START_MS + ZOOM_IN_MS;
-const BG_FADE_START_MS = EMBER_HOLD_START_MS + EMBER_HOLD_MS;
-const FADE_START_MS = BG_FADE_START_MS + BG_FADE_MS;
-const TOTAL_MS = FADE_START_MS + FADE_MS;
-const SNAKE_LEN_PX = 100;
-const MAX_STAGGER_MS = 380;
-const NODE_QUANT = 10;
-/** Outer hex rings (from the screen edge) charged with laser color at start. */
-const EDGE_CHARGE_LAYERS = 5;
-/** How quickly a charged hex finishes draining once its snake tail has passed. */
-const EDGE_DRAIN_PER_FRAME = 0.45;
-
+const HEX_COLOR = 0x0c0a0a;
+const FLOOR_COLOR = 0x060505;
+const CLEAR_COLOR = 0x050505;
+const TRENCH_EMISSIVE = 0x3a0808;
+/** Tuning sliders are hidden once the loader's look is finalized; flip to debug again. */
+const SHOW_DEBUG_PANEL = false;
+/** Camera elevation drifts across this range while the wave sweeps inward. */
+const ELEV_DRIFT_START = 40;
+const ELEV_DRIFT_END = 60;
 /**
- * Fine hex lattice inside the center cell. Thin snakes (~1/12 outer width)
- * fill the hex so it reads solid from afar; zoom reveals the gaps.
+ * Dolly zoom into the glowing centre hex once the flare fades: the camera
+ * pushes toward it along the current viewing ray while the FOV widens for
+ * the classic rush-forward warp, ending once the hex fills the frame.
+ *
+ * The FOV widening is deliberately back-loaded relative to the distance
+ * closing (see DOLLY_FOV_EASE_POWER): a wide FOV multiplies how much ground
+ * is visible at any given distance, so widening it early — while the camera
+ * is still far away — briefly reveals ground well past the edge of the
+ * pre-built grid. Keeping the FOV close to its start value until the camera
+ * has mostly closed the distance keeps the visible footprint monotonically
+ * shrinking instead of spiking mid-flight.
  */
-const MESH_CELL_PX = HEX_SIZE_PX / 10;
-const MESH_SNAKE_WIDTH_PX = SNAKE_WIDTH_PX / 12;
-/** Empty hole left in the mesh for the final zoom-through. */
-const MESH_GAP_R = MESH_CELL_PX * 1.35;
-/** Three stacked grids; lower layers rotated + translated so each reads clearly. */
-const MESH_LAYERS = 3;
+const DOLLY_BASE_DURATION = 1.6;
+const DOLLY_TARGET_FOV = 70;
+const DOLLY_FILL_MARGIN = 0.92;
+const DOLLY_DIST_EASE_POWER = 2;
+const DOLLY_FOV_EASE_POWER = 6;
 /**
- * Back → front rotations. Avoid 60° (hex lattice maps onto itself).
- * 30° / 15° / 0° keeps three distinct orientations.
+ * Second push once the FOV-warp dolly zoom lands: FOV stays fixed here (only
+ * distance keeps closing), so the footprint only keeps shrinking — no need
+ * to re-check it against the grid bounds. This is what actually gets the
+ * hex to dominate the frame; a smaller margin means a closer final distance.
  */
-const MESH_LAYER_ANGLES = [Math.PI / 6, Math.PI / 12, 0];
+const PUNCH_FILL_MARGIN = 0.7;
+const PUNCH_DURATION = 0.5;
 /**
- * Back → front world-space offsets (multiples of cell size) so the third
- * layer isn't buried under the others.
+ * Reveal transition once the dolly zoom's colour wash covers the screen: the
+ * real page (already sitting hidden underneath the loader the whole time)
+ * is scaled way up around the nav logo's "R", then eased back down to its
+ * natural size — a zoom-out emerging from that single point — while the
+ * wash fades away over the same stretch.
  */
-const MESH_LAYER_OFFSETS: ReadonlyArray<{ x: number; y: number }> = [
-  { x: -0.42, y: -0.38 },
-  { x: 0.36, y: -0.28 },
-  { x: 0, y: 0 },
-];
-/** Fraction of lattice edges kept (incomplete honeycomb). */
-const MESH_EDGE_KEEP = 0.82;
-
-/** Parallel ember rows packed across each mesh snake. */
-const MESH_EMBER_LINES = 5;
-/** Match dustScene in-place glyph flicker rate. */
-const MESH_EMBER_FLICKER = 0.08;
+const REVEAL_START_SCALE = 34;
+const REVEAL_DURATION = 2.3;
 /**
- * Screen-space snake thickness where solid mesh starts dissolving into glyphs.
- * Full morph once the inner mesh fills the frame like the deep-zoom hold.
+ * The wash stays opaque until the page has zoomed back down to nearly this
+ * scale before fading. At high magnification even a couple of pixels of
+ * anchor imprecision (font antialiasing, glyph metrics) reads as an obvious
+ * colour mismatch once blown up 30-plus times; holding the flat wash colour
+ * until we're much closer to natural size keeps that imprecision invisible.
  */
-const MESH_EMBER_MORPH_START_PX = 18;
-const MESH_EMBER_MORPH_FULL_PX = 38;
-/** Screen-space border between outer lasers and the center mesh. */
-const CENTER_HEX_BORDER_PX = 18;
-/** Extra glyph size on the loading mesh embers only (not dustScene). */
-const MESH_EMBER_FONT_EXTRA_PX = 4;
-/** How many front mesh layers morph into ember characters. */
-const MESH_EMBER_LAYERS = 2;
-/** Atlas cell size for fast drawImage glyphs (avoids fillText per frame). */
-const EMBER_ATLAS_CELL = 64;
-const EMBER_ATLAS_COLS = 16;
+const REVEAL_WASH_CLEAR_SCALE = 1.6;
+/**
+ * Bloom strength is derived from the wave intensity rather than being its own
+ * slider — both fed the same perceived brightness, so one knob now drives the
+ * emissive ramp and the glow spill together.
+ */
+const BLOOM_PER_INTENSITY = 0.2;
+function bloomStrengthFor(intensity: number): number {
+  return Math.max(0, intensity) * BLOOM_PER_INTENSITY;
+}
 
-type Vec = { x: number; y: number };
+/** Extra hex radii past the screen edge so tiles aren't clipped at the frame. */
+const VIEW_PAD_HEXES = 2;
+const SQRT3 = Math.sqrt(3);
+const LOOK_AT = new Vector3(0, 0, 0);
 
-type GraphNode = {
-  x: number;
-  y: number;
-  nbs: number[];
+function cloneParams(source: LoaderParams): LoaderParams {
+  return {
+    ...source,
+    topPos: [...source.topPos],
+    leftPos: [...source.leftPos],
+    rightPos: [...source.rightPos],
+    backPos: [...source.backPos],
+    frontPos: [...source.frontPos],
+    waveWidth: source.waveWidth ?? 2,
+    waveIntensity: source.waveIntensity ?? 2,
+    waveSpeed: source.waveSpeed ?? 9,
+    centerHexEdge: source.centerHexEdge ?? 1.29,
+    dollySpeed: source.dollySpeed ?? 1,
+  };
+}
+
+const params = cloneParams(loadingScreenConfig);
+
+type SceneLights = {
+  hemi: HemisphereLight;
+  ambient: AmbientLight;
+  top: DirectionalLight;
+  left: DirectionalLight;
+  right: DirectionalLight;
+  back: DirectionalLight;
+  front: DirectionalLight;
 };
 
-type Snake = {
-  xs: Float32Array;
-  ys: Float32Array;
-  cum: Float32Array;
-  total: number;
-  delay: number;
-  duration: number;
-};
-
-type HexCell = {
-  col: number;
-  row: number;
-  x: number;
-  y: number;
-  tint: number;
-  /** 0..EDGE_CHARGE_LAYERS-1 if in the charged outer ring, else -1. */
-  edgeLayer: number;
-  /** 0 = full laser charge, 1 = drained to base fill. */
-  drain: number;
-  /**
-   * Snakes whose paths pass this hex, with the path distance at contact.
-   * Drains once any listed snake's tail moves past its distance.
-   */
-  passList: Array<{ s: number; d: number }> | null;
-};
-
-/** One mesh snake edge with 5 parallel ember rows (chars swap in place). */
-type MeshEdgeEmber = {
-  x0: number;
-  y0: number;
-  x1: number;
-  y1: number;
-  len: number;
-  angle: number;
-  ux: number;
-  uy: number;
-  nx: number;
-  ny: number;
-  slots: number;
-  chars: Uint16Array;
+type FoundationScene = {
+  renderer: WebGLRenderer;
+  scene: Scene;
+  camera: PerspectiveCamera;
+  composer: EffectComposer;
+  bloomPass: UnrealBloomPass;
+  hexMesh: InstancedMesh;
+  hexMat: MeshPhysicalMaterial;
+  floor: Mesh;
+  root: Group;
+  lights: SceneLights;
+  wave: WaveSystem;
+  dispose: () => void;
 };
 
 /**
- * Vector hex lattice for the center cell. Stroked live under the camera so
- * zoom stays sharp (a baked bitmap blurs once scaled past its resolution).
+ * Static isometric hex-floor foundation for the portfolio loader.
+ * Press Space or click the canvas to continue. The debug sliders stay interactive.
  */
-type CenterMesh = {
-  path: Path2D;
-  edges: MeshEdgeEmber[];
-  gapR: number;
-  clipR: number;
-  cell: number;
-};
-
-type EmberAtlas = {
-  canvas: HTMLCanvasElement;
-  cell: number;
-  cols: number;
-};
-
 export function setupLoadingScreen(): Promise<void> {
   return new Promise((resolve) => {
     const overlay =
@@ -176,7 +164,10 @@ export function setupLoadingScreen(): Promise<void> {
     overlay.className = "loading-screen";
     overlay.setAttribute("role", "status");
     overlay.setAttribute("aria-live", "polite");
-    overlay.setAttribute("aria-label", "Loading");
+    overlay.setAttribute(
+      "aria-label",
+      "Loading. Click the canvas to continue, or press Space to pause.",
+    );
     if (!overlay.parentElement) {
       document.body.prepend(overlay);
     }
@@ -186,1544 +177,1024 @@ export function setupLoadingScreen(): Promise<void> {
     overlay.replaceChildren(canvas);
     document.documentElement.classList.add("is-loading");
     document.body.classList.add("is-loading");
+    overlay.style.background = "#050608";
 
-    const ctx = canvas.getContext("2d");
-    let removePauseHotkey: (() => void) | null = null;
-    const abort = () => {
-      cancelAnimationFrame(raf);
-      removePauseHotkey?.();
-      overlay.remove();
-      document.documentElement.classList.remove("is-loading");
-      document.body.classList.remove("is-loading");
-      resolve();
-    };
+    // Guarantees a perfectly uniform, edge-free frame once the dolly zoom
+    // reaches the centre hex: 3D framing alone can't promise every pixel is
+    // covered by the hex's silhouette, so this flat-colour layer fades in
+    // over the tail of the push and finishes the job.
+    const colorWashColor = `#${new Color(WAVE_COLOR).getHexString()}`;
+    const colorWash = document.createElement("div");
+    colorWash.style.cssText = `
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      background: ${colorWashColor};
+      opacity: 0;
+      pointer-events: none;
+    `;
+    overlay.appendChild(colorWash);
+
     let raf = 0;
-    if (!ctx) {
-      abort();
-      return;
-    }
-
-    try {
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const width = Math.max(1, window.innerWidth);
-    const height = Math.max(1, window.innerHeight);
-    canvas.width = Math.floor(width * dpr);
-    canvas.height = Math.floor(height * dpr);
-    canvas.style.width = `${width}px`;
-    canvas.style.height = `${height}px`;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-    const bg = readCssColor("--bg", HEX_FILL);
-    const accent = readCssColor("--accent", HEX_HIGHLIGHT);
-    const accentRgb = cssToRgb(accent);
-    const bgRgb = cssToRgb(bg);
-    // Page stays visible underneath; canvas paints its own opaque cover early on.
-    overlay.style.background = "transparent";
-
-    const cells = buildCells(width, height);
-    const center = pickCenterHex(cells, width, height);
-    const { nodes, goals, hexVerts } = buildGapGraph(width, height, center);
-    const snakes = spawnSnakes(nodes, goals, hexVerts, cells, center);
-    bindEdgeDrainToSnakes(cells, snakes);
-    const mesh = buildCenterMesh(center);
-    const emberAtlas = createEmberAtlas(accent);
-
-    // Ember framing zoom — stay here and fade over the page (no empty-hole flash).
-    const zoomEmber = Math.max(
-      MESH_EMBER_MORPH_FULL_PX / Math.max(MESH_SNAKE_WIDTH_PX, 0.0001),
-      zoomHexFill(width, height) * 1.35,
-    );
-    const zoomMax = zoomEmber;
-
-    const sample = { x: 0, y: 0 };
-    let activeCells = cells;
-    /** Settled laser trails as one Path2D — stroked live so zoom stays sharp. */
-    let settledSnakes: Path2D | null = null;
-    let fading = false;
-    let paused = false;
-    let pauseStartedAt = 0;
-    let pausedTotalMs = 0;
-    const start = performance.now();
-
-    const elapsed = (now: number) => now - start - pausedTotalMs;
+    let foundation: FoundationScene | null = null;
+    let removeListeners: (() => void) | null = null;
+    let hexTimer = 0;
+    let camTimer = 0;
+    let elevTween: gsap.core.Tween | null = null;
+    let dollyTween: gsap.core.Tween | null = null;
+    let revealTween: gsap.core.Tween | null = null;
 
     const finish = () => {
       cancelAnimationFrame(raf);
-      removePauseHotkey?.();
+      window.clearTimeout(hexTimer);
+      window.clearTimeout(camTimer);
+      elevTween?.kill();
+      dollyTween?.kill();
+      revealTween?.kill();
+      document.body.style.transform = "";
+      document.body.style.transformOrigin = "";
+      document.documentElement.style.overflow = "";
+      document.body.style.pointerEvents = "";
+      removeListeners?.();
+      foundation?.dispose();
+      foundation = null;
       overlay.remove();
       document.documentElement.classList.remove("is-loading");
       document.body.classList.remove("is-loading");
       resolve();
     };
 
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.code !== "Space" && event.key !== " ") return;
-      event.preventDefault();
-      if (paused) {
-        pausedTotalMs += performance.now() - pauseStartedAt;
-        paused = false;
-      } else {
-        paused = true;
-        pauseStartedAt = performance.now();
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    removePauseHotkey = () => window.removeEventListener("keydown", onKeyDown);
-
-    const tick = (now: number) => {
-      if (paused) {
-        raf = requestAnimationFrame(tick);
-        return;
-      }
-
-      const t = elapsed(now);
-      const zoom = cameraZoom(t, zoomMax, zoomEmber);
-
-      if (t >= TRAVEL_MS && !settledSnakes) {
-        settledSnakes = buildUniqueLaserPath(snakes, true, t, sample);
-        activeCells = cells;
-      }
-
-      // Drop hexes that have left the viewport while zooming.
-      if (t >= ZOOM_START_MS && activeCells.length > 1) {
-        activeCells = cullVisibleCells(activeCells, center, zoom, width, height);
-      }
-
-      // Canvas bg stays solid until the ember mesh fills the screen, then
-      // slowly clears to show the page underneath (embers stay on top).
-      const pageReveal = pageRevealAmount(t);
-      const graphicsFade = graphicsFadeAmount(t);
-
-      drawFrame(ctx, {
-        t,
-        width,
-        height,
-        bg,
-        bgRgb,
-        accent,
-        accentRgb,
-        cells: activeCells,
-        center,
-        snakes,
-        mesh,
-        emberAtlas,
-        settledSnakes,
-        zoomMax,
-        zoomEmber,
-        pageReveal,
-        graphicsFade,
-        sample,
+    const onWavePlayStart = (durationSeconds: number) => {
+      elevTween?.kill();
+      const proxy = { elev: ELEV_DRIFT_START };
+      elevTween = gsap.to(proxy, {
+        elev: ELEV_DRIFT_END,
+        duration: durationSeconds,
+        ease: "sine.inOut",
+        onUpdate: () => {
+          if (!foundation) return;
+          params.camElevation = proxy.elev;
+          placeIsometricCamera(
+            foundation.camera,
+            Math.max(1, window.innerWidth),
+            Math.max(1, window.innerHeight),
+          );
+        },
       });
-
-      if (t >= FADE_START_MS && !fading) {
-        fading = true;
-        document.documentElement.classList.remove("is-loading");
-        document.body.classList.remove("is-loading");
-      }
-      if (t >= TOTAL_MS) {
-        finish();
-        return;
-      }
-      raf = requestAnimationFrame(tick);
     };
 
-    drawFrame(ctx, {
-      t: 0,
-      width,
-      height,
-      bg,
-      bgRgb,
-      accent,
-      accentRgb,
-      cells: activeCells,
-      center,
-      snakes,
-      mesh,
-      emberAtlas,
-      settledSnakes,
-      zoomMax,
-      zoomEmber,
-      pageReveal: 0,
-      graphicsFade: 1,
-      sample,
-    });
-    raf = requestAnimationFrame(tick);
+    const startReveal = () => {
+      cancelAnimationFrame(raf);
+      revealTween?.kill();
+
+      // Re-parent the loader above <body> so the page's zoom-out transform
+      // (applied to <body> below) doesn't drag this still-opaque cover along
+      // with it — it has to stay pinned full-viewport until its own fade.
+      document.documentElement.appendChild(overlay);
+      document.documentElement.classList.remove("is-loading");
+      document.body.classList.remove("is-loading");
+      // The is-loading class also gated scroll/pointer-events; removing it
+      // reveals the real DOM, so re-lock both by hand until the zoom-out
+      // settles — otherwise the page can be scrolled or clicked mid-flight.
+      document.documentElement.style.overflow = "hidden";
+      document.body.style.pointerEvents = "none";
+
+      const anchor =
+        document.querySelector<HTMLElement>(".logo-r") ??
+        document.querySelector<HTMLElement>(".logo");
+      const rect = anchor?.getBoundingClientRect();
+      const originX = rect ? rect.left + rect.width / 2 : 24;
+      const originY = rect ? rect.top + rect.height / 2 : 24;
+      document.body.style.transformOrigin = `${originX}px ${originY}px`;
+      document.body.style.transform = `scale(${REVEAL_START_SCALE})`;
+
+      const proxy = { scale: REVEAL_START_SCALE };
+      revealTween = gsap.to(proxy, {
+        scale: 1,
+        duration: REVEAL_DURATION,
+        ease: "power2.out",
+        onUpdate: () => {
+          document.body.style.transform = `scale(${proxy.scale})`;
+          const washT =
+            (proxy.scale - REVEAL_WASH_CLEAR_SCALE) /
+            (REVEAL_START_SCALE - REVEAL_WASH_CLEAR_SCALE);
+          overlay.style.opacity = String(Math.max(0, Math.min(1, washT)));
+        },
+        onComplete: () => {
+          finish();
+        },
+      });
+    };
+
+    const onFlareDone = () => {
+      if (!foundation) return;
+      elevTween?.kill();
+      dollyTween?.kill();
+
+      // Push straight down the current viewing ray while widening the FOV —
+      // a dolly zoom — until the centre hex's world-space radius fills the
+      // viewport at the new, much closer distance. The camera also swings
+      // around the hex (azimuth) over the combined zoom-in, split between
+      // this stage and the punch-in below in proportion to their durations.
+      //
+      // placeIsometricCamera pads the distance by up to 8 units on wide
+      // viewports to keep the intro shot framed on ultra-wide monitors — far
+      // bigger than the sub-1-unit distances targeted below, so from here on
+      // every render call skips that padding. distStart captures the actual
+      // distance the camera was already sitting at (padding included) so the
+      // switch doesn't cause a visible pop.
+      const wideAspect = Math.max(1, window.innerWidth) / Math.max(1, window.innerHeight);
+      const padAtStart = Math.max(0, wideAspect - 1) * 8;
+      const hexRadius = Math.max(0.05, params.centerHexEdge - params.hexGap / SQRT3);
+      const fovEndRad = (DOLLY_TARGET_FOV * Math.PI) / 180;
+      const distEnd = Math.max(
+        0.05,
+        (hexRadius * DOLLY_FILL_MARGIN) / Math.tan(fovEndRad / 2),
+      );
+
+      const distStart = params.camDistance + padAtStart;
+      const fovStart = params.camFov;
+      const azimStart = params.camAzimuth;
+      const azimEnd = azimStart + 180;
+      const durationA = DOLLY_BASE_DURATION / Math.max(0.1, params.dollySpeed);
+      const durationB = PUNCH_DURATION / Math.max(0.1, params.dollySpeed);
+      const azimAtHandoff = azimStart + 180 * (durationA / (durationA + durationB));
+
+      const proxy = { t: 0 };
+      dollyTween = gsap.to(proxy, {
+        t: 1,
+        duration: durationA,
+        ease: "none",
+        onUpdate: () => {
+          if (!foundation) return;
+          const distT = proxy.t ** DOLLY_DIST_EASE_POWER;
+          const fovT = proxy.t ** DOLLY_FOV_EASE_POWER;
+          params.camDistance = distStart + (distEnd - distStart) * distT;
+          params.camFov = fovStart + (DOLLY_TARGET_FOV - fovStart) * fovT;
+          params.camAzimuth = azimStart + (azimAtHandoff - azimStart) * proxy.t;
+          placeIsometricCamera(
+            foundation.camera,
+            Math.max(1, window.innerWidth),
+            Math.max(1, window.innerHeight),
+            true,
+          );
+        },
+        onComplete: () => {
+          startPunchIn(distEnd, azimAtHandoff, azimEnd);
+        },
+      });
+    };
+
+    const startPunchIn = (
+      distFrom: number,
+      azimFrom: number,
+      azimTo: number,
+    ) => {
+      if (!foundation) return;
+
+      // Continue straight in, FOV fixed, until the hex genuinely dominates
+      // the frame. The colour wash now rides directly on this stage's own
+      // progress — no separate pause-then-flash, it ramps in step with the
+      // hex visibly taking over the viewport.
+      const hexRadius = Math.max(0.05, params.centerHexEdge - params.hexGap / SQRT3);
+      const fovRad = (params.camFov * Math.PI) / 180;
+      const distTo = Math.max(
+        0.05,
+        (hexRadius * PUNCH_FILL_MARGIN) / Math.tan(fovRad / 2),
+      );
+
+      const proxy = { t: 0 };
+      const duration = PUNCH_DURATION / Math.max(0.1, params.dollySpeed);
+      dollyTween = gsap.to(proxy, {
+        t: 1,
+        duration,
+        ease: "power2.in",
+        onUpdate: () => {
+          if (!foundation) return;
+          params.camDistance = distFrom + (distTo - distFrom) * proxy.t;
+          params.camAzimuth = azimFrom + (azimTo - azimFrom) * proxy.t;
+          placeIsometricCamera(
+            foundation.camera,
+            Math.max(1, window.innerWidth),
+            Math.max(1, window.innerHeight),
+            true,
+          );
+          colorWash.style.opacity = String(proxy.t);
+        },
+        onComplete: () => {
+          startReveal();
+        },
+      });
+    };
+
+    try {
+      foundation = createFoundationScene(canvas, onWavePlayStart, onFlareDone);
+      const panel = SHOW_DEBUG_PANEL
+        ? mountDebugPanel(overlay, {
+            onLights: () => {
+              if (foundation) applyLights(foundation);
+            },
+            onCamera: () => {
+              elevTween?.kill();
+              window.clearTimeout(camTimer);
+              camTimer = window.setTimeout(() => {
+                if (foundation) applyCameraAndGrid(foundation, false);
+              }, 70);
+            },
+            onHex: () => {
+              window.clearTimeout(hexTimer);
+              hexTimer = window.setTimeout(() => {
+                if (foundation) applyCameraAndGrid(foundation, true);
+              }, 40);
+            },
+            onWave: () => {
+              foundation?.wave.applySettings();
+            },
+            onBloom: () => {
+              if (foundation) applyBloom(foundation);
+            },
+            onDolly: () => {
+              // Speed only affects the next post-flare push; nothing to
+              // re-apply live.
+            },
+          })
+        : null;
+
+      const onResize = () => {
+        if (!foundation) return;
+        applyCameraAndGrid(foundation, false);
+      };
+      window.addEventListener("resize", onResize);
+
+      let paused = false;
+      const pauseBadge = document.createElement("div");
+      pauseBadge.textContent = "Paused — Space to resume";
+      pauseBadge.hidden = true;
+      pauseBadge.style.cssText = `
+        position: absolute;
+        left: 12px;
+        top: 12px;
+        z-index: 2;
+        padding: 7px 12px;
+        border: 1px solid rgba(255, 100, 100, 0.35);
+        border-radius: 8px;
+        background: rgba(8, 10, 14, 0.6);
+        backdrop-filter: blur(10px);
+        color: #ffb4a0;
+        font: 11px/1.3 ui-sans-serif, system-ui, sans-serif;
+        letter-spacing: 0.04em;
+        pointer-events: none;
+      `;
+      overlay.appendChild(pauseBadge);
+
+      const togglePause = () => {
+        paused = !paused;
+        if (paused) {
+          foundation?.wave.pause();
+          elevTween?.pause();
+          dollyTween?.pause();
+          revealTween?.pause();
+        } else {
+          foundation?.wave.resume();
+          elevTween?.resume();
+          dollyTween?.resume();
+          revealTween?.resume();
+        }
+        pauseBadge.hidden = !paused;
+      };
+
+      const onKeydown = (event: KeyboardEvent) => {
+        if (event.code !== "Space" && event.key !== " ") return;
+        event.preventDefault();
+        togglePause();
+      };
+      const onContinue = () => {
+        finish();
+      };
+      window.addEventListener("keydown", onKeydown);
+      canvas.addEventListener("pointerdown", onContinue);
+      removeListeners = () => {
+        window.removeEventListener("resize", onResize);
+        window.removeEventListener("keydown", onKeydown);
+        canvas.removeEventListener("pointerdown", onContinue);
+        panel?.remove();
+        pauseBadge.remove();
+      };
+
+      let lastFrame = performance.now();
+      const tick = () => {
+        if (!foundation) return;
+        const now = performance.now();
+        const dt = Math.min(0.05, Math.max(0, (now - lastFrame) / 1000));
+        lastFrame = now;
+        if (!paused) foundation.wave.update(dt);
+        foundation.composer.render();
+        raf = requestAnimationFrame(tick);
+      };
+      raf = requestAnimationFrame(tick);
     } catch {
-      abort();
+      finish();
     }
   });
 }
 
-function loadingHexCenter(col: number, row: number): { x: number; y: number } {
-  const offset = row % 2 === 0 ? 0 : LOADING_COL_W / 2;
-  return { x: col * LOADING_COL_W + offset, y: row * LOADING_ROW_H };
+function createFoundationScene(
+  canvas: HTMLCanvasElement,
+  onWavePlayStart: (durationSeconds: number) => void,
+  onFlareDone: () => void,
+): FoundationScene {
+  const width = Math.max(1, window.innerWidth);
+  const height = Math.max(1, window.innerHeight);
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+  const renderer = new WebGLRenderer({
+    canvas,
+    antialias: true,
+    powerPreference: "high-performance",
+  });
+  renderer.setPixelRatio(dpr);
+  renderer.setSize(width, height, false);
+  renderer.setClearColor(CLEAR_COLOR, 1);
+  renderer.toneMapping = ACESFilmicToneMapping;
+  renderer.toneMappingExposure = params.exposure;
+  renderer.shadowMap.enabled = false;
+
+  const scene = new Scene();
+  scene.background = new Color(CLEAR_COLOR);
+
+  const root = new Group();
+  scene.add(root);
+
+  const camera = new PerspectiveCamera(params.camFov, width / height, 0.1, 500);
+  const initialBounds = getWorstCaseGroundBounds(camera, width, height);
+
+  const floorMat = new MeshStandardMaterial({
+    color: FLOOR_COLOR,
+    metalness: 0.05,
+    roughness: 0.85,
+    emissive: new Color(TRENCH_EMISSIVE),
+    emissiveIntensity: 0.35,
+  });
+  const floor = new Mesh(new PlaneGeometry(2, 2), floorMat);
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.y = -0.001;
+  root.add(floor);
+
+  const hexGeo = createHexBuildingGeometry();
+  const hexMat = new MeshPhysicalMaterial({
+    color: HEX_COLOR,
+    metalness: 0.22,
+    roughness: 0.6,
+    envMapIntensity: params.envIntensity,
+    clearcoat: 0.18,
+    clearcoatRoughness: 0.45,
+  });
+  applyGlowShader(hexMat);
+
+  const bounds = initialBounds;
+  fitFloorToBounds(floor, bounds);
+  const positions = buildHexPositions(bounds, camera);
+  const tiles = positions.filter((p) => !isOriginHex(p, params.hexEdge));
+  attachGlowAttribute(hexGeo, Math.max(1, tiles.length));
+  const hexMesh = new InstancedMesh(
+    hexGeo,
+    hexMat,
+    Math.max(1, tiles.length),
+  );
+  hexMesh.instanceMatrix.setUsage(DynamicDrawUsage);
+  populateHexInstances(hexMesh, tiles);
+  root.add(hexMesh);
+
+  // Centre hex keeps its own geometry so the Hex "Edge" slider only resizes
+  // the surrounding grid.
+  const centerGeo = createHexBuildingGeometry(params.centerHexEdge);
+  const wave = createWaveSystem(centerGeo, () => params, onWavePlayStart, onFlareDone);
+  root.add(wave.group);
+  wave.rebuild(tiles, params.hexEdge, params.hexHeight, hexMesh);
+
+  const pmrem = new PMREMGenerator(renderer);
+  const envScene = new RoomEnvironment();
+  const envMap = pmrem.fromScene(envScene, 0.04).texture;
+  scene.environment = envMap;
+  envScene.dispose();
+  pmrem.dispose();
+
+  const addDir = (color: number, intensity: number, pos: Vec3): DirectionalLight => {
+    const light = new DirectionalLight(color, intensity);
+    light.position.set(...pos);
+    light.target.position.copy(LOOK_AT);
+    scene.add(light.target);
+    scene.add(light);
+    return light;
+  };
+
+  const lights: SceneLights = {
+    hemi: new HemisphereLight(0xd4dce6, 0x1a1e26, params.hemiIntensity),
+    ambient: new AmbientLight(0xb8c2cc, params.ambientIntensity),
+    top: addDir(0xf2f5f8, params.topIntensity, params.topPos),
+    left: addDir(0xe4ebf2, params.leftIntensity, params.leftPos),
+    right: addDir(0xe4ebf2, params.rightIntensity, params.rightPos),
+    back: addDir(0xcdd6e0, params.backIntensity, params.backPos),
+    front: addDir(0xc5d0dc, params.frontIntensity, params.frontPos),
+  };
+  scene.add(lights.hemi);
+  scene.add(lights.ambient);
+
+  const composer = new EffectComposer(renderer);
+  composer.setSize(width, height);
+  composer.setPixelRatio(dpr);
+  composer.addPass(new RenderPass(scene, camera));
+  const bloomPass = new UnrealBloomPass(
+    new Vector2(width, height),
+    bloomStrengthFor(params.waveIntensity),
+    params.bloomRadius,
+    params.bloomThreshold,
+  );
+  composer.addPass(bloomPass);
+  composer.addPass(new OutputPass());
+
+  const dispose = () => {
+    wave.dispose();
+    hexMesh.geometry.dispose();
+    hexMat.dispose();
+    floor.geometry.dispose();
+    floorMat.dispose();
+    envMap.dispose();
+    bloomPass.dispose();
+    composer.dispose();
+    renderer.dispose();
+  };
+
+  return {
+    renderer,
+    scene,
+    camera,
+    composer,
+    bloomPass,
+    hexMesh,
+    hexMat,
+    floor,
+    root,
+    lights,
+    wave,
+    dispose,
+  };
 }
 
-function buildCells(width: number, height: number): HexCell[] {
-  const cols = Math.ceil(width / LOADING_COL_W) + 2;
-  const rows = Math.ceil(height / LOADING_ROW_H) + 2;
-  const cells: HexCell[] = [];
-  for (let row = -1; row < rows; row += 1) {
-    for (let col = -1; col < cols; col += 1) {
-      const { x, y } = loadingHexCenter(col, row);
-      if (!hexFits(x, y, HEX_SIZE_PX, width, height, 0)) continue;
-      cells.push({
-        col,
-        row,
-        x,
-        y,
-        tint: hexTint(col, row),
-        edgeLayer: -1,
-        drain: 0,
-        passList: null,
+function applyLights(sc: FoundationScene): void {
+  sc.renderer.toneMappingExposure = params.exposure;
+  sc.hexMat.envMapIntensity = params.envIntensity;
+  sc.lights.hemi.intensity = params.hemiIntensity;
+  sc.lights.ambient.intensity = params.ambientIntensity;
+  setDir(sc.lights.top, params.topIntensity, params.topPos);
+  setDir(sc.lights.left, params.leftIntensity, params.leftPos);
+  setDir(sc.lights.right, params.rightIntensity, params.rightPos);
+  setDir(sc.lights.back, params.backIntensity, params.backPos);
+  setDir(sc.lights.front, params.frontIntensity, params.frontPos);
+}
+
+function applyBloom(sc: FoundationScene): void {
+  sc.bloomPass.strength = bloomStrengthFor(params.waveIntensity);
+  sc.bloomPass.radius = params.bloomRadius;
+  sc.bloomPass.threshold = params.bloomThreshold;
+}
+
+function setDir(light: DirectionalLight, intensity: number, pos: Vec3): void {
+  light.intensity = intensity;
+  light.position.set(...pos);
+}
+
+function applyCameraAndGrid(sc: FoundationScene, rebuildGeometry: boolean): void {
+  const width = Math.max(1, window.innerWidth);
+  const height = Math.max(1, window.innerHeight);
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  sc.renderer.setPixelRatio(dpr);
+  sc.renderer.setSize(width, height, false);
+  sc.composer.setPixelRatio(dpr);
+  sc.composer.setSize(width, height);
+
+  const bounds = getWorstCaseGroundBounds(sc.camera, width, height);
+  fitFloorToBounds(sc.floor, bounds);
+
+  const old = sc.hexMesh;
+  const mat = sc.hexMat;
+  let geo = old.geometry;
+  if (rebuildGeometry) {
+    geo = createHexBuildingGeometry();
+    old.geometry.dispose();
+    // Centre hex is rebuilt from its own edge param, never the grid's.
+    const oldCenter = sc.wave.centerMesh.geometry;
+    sc.wave.centerMesh.geometry = createHexBuildingGeometry(params.centerHexEdge);
+    oldCenter.dispose();
+  }
+  const positions = buildHexPositions(bounds, sc.camera);
+  const tiles = positions.filter((p) => !isOriginHex(p, params.hexEdge));
+  attachGlowAttribute(geo, Math.max(1, tiles.length));
+  const next = new InstancedMesh(geo, mat, Math.max(1, tiles.length));
+  next.instanceMatrix.setUsage(DynamicDrawUsage);
+  populateHexInstances(next, tiles);
+  sc.root.remove(old);
+  sc.root.add(next);
+  sc.hexMesh = next;
+  sc.wave.rebuild(tiles, params.hexEdge, params.hexHeight, next);
+}
+
+function createHexBuildingGeometry(edge = params.hexEdge): ExtrudeGeometry {
+  const r = Math.max(0.05, edge - params.hexGap / SQRT3);
+  const shape = new Shape();
+  for (let i = 0; i < 6; i += 1) {
+    const a = (Math.PI / 3) * i - Math.PI / 6;
+    const x = r * Math.cos(a);
+    const y = r * Math.sin(a);
+    if (i === 0) shape.moveTo(x, y);
+    else shape.lineTo(x, y);
+  }
+  shape.closePath();
+
+  const geo = new ExtrudeGeometry(shape, {
+    depth: Math.max(0.02, params.hexHeight),
+    bevelEnabled: true,
+    bevelThickness: 0.018,
+    bevelSize: 0.018,
+    bevelSegments: 1,
+    curveSegments: 1,
+  });
+  geo.rotateX(-Math.PI / 2);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+type GroundBounds = {
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+};
+
+/**
+ * Adds a per-instance `aGlow` float that drives emissive output, letting each
+ * floor tile light up independently while sharing one draw call. Instance
+ * colour would only tint the diffuse term, which reads as flat grey against
+ * the dark palette and never reaches the bloom threshold.
+ */
+function applyGlowShader(mat: MeshPhysicalMaterial): void {
+  // Mirrors the centre hex's own lit look: diffuse lerps toward the wave red
+  // while emissive ramps up, both driven by the tile's 0..1 rise progress.
+  const strength = { value: 0 };
+  mat.userData.glowStrength = strength;
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uGlowColor = { value: new Color(WAVE_COLOR) };
+    shader.uniforms.uGlowStrength = strength;
+    shader.vertexShader = `attribute float aGlow;\nvarying float vGlow;\n${shader.vertexShader}`.replace(
+      "#include <begin_vertex>",
+      "#include <begin_vertex>\n\tvGlow = aGlow;",
+    );
+    shader.fragmentShader = `uniform vec3 uGlowColor;\nuniform float uGlowStrength;\nvarying float vGlow;\n${shader.fragmentShader}`
+      .replace(
+        "#include <color_fragment>",
+        "#include <color_fragment>\n\tdiffuseColor.rgb = mix( diffuseColor.rgb, uGlowColor, clamp( vGlow, 0.0, 1.0 ) );",
+      )
+      .replace(
+        "#include <emissivemap_fragment>",
+        "#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += uGlowColor * ( vGlow * uGlowStrength );",
+      );
+  };
+  mat.customProgramCacheKey = () => "loader-hex-glow";
+}
+
+/** Sized to match the instance count; read and written by the wave system. */
+function attachGlowAttribute(geo: BufferGeometry, count: number): void {
+  const attr = new InstancedBufferAttribute(new Float32Array(count), 1);
+  attr.setUsage(DynamicDrawUsage);
+  geo.setAttribute("aGlow", attr);
+}
+
+function populateHexInstances(
+  hexMesh: InstancedMesh,
+  positions: Array<{ x: number; z: number }>,
+): void {
+  const dummy = new Object3D();
+  for (let i = 0; i < positions.length; i += 1) {
+    const p = positions[i];
+    dummy.position.set(p.x, 0, p.z);
+    dummy.rotation.set(0, 0, 0);
+    dummy.scale.set(1, 1, 1);
+    dummy.updateMatrix();
+    hexMesh.setMatrixAt(i, dummy.matrix);
+  }
+  hexMesh.instanceMatrix.needsUpdate = true;
+}
+
+function fitFloorToBounds(floor: Mesh, bounds: GroundBounds): void {
+  const pad = params.hexEdge * 2;
+  const w = bounds.maxX - bounds.minX + pad * 2;
+  const d = bounds.maxZ - bounds.minZ + pad * 2;
+  floor.scale.set(w * 0.5, d * 0.5, 1);
+  floor.position.set(
+    (bounds.minX + bounds.maxX) * 0.5,
+    -0.001,
+    (bounds.minZ + bounds.maxZ) * 0.5,
+  );
+}
+
+/**
+ * Small buffer over the exact 8-ray sample, since the true frustum-ground
+ * intersection is a smooth curve and the samples only approximate it.
+ */
+const FOOTPRINT_SAFETY = 1.08;
+
+/**
+ * Bounds sized for the widest point of the elevation drift (its lower start
+ * angle sees further across the ground than the settled end angle), not
+ * whatever elevation the camera currently happens to be at. Azimuth is
+ * constant during the loader, so no rotation margin is needed.
+ */
+function getWorstCaseGroundBounds(
+  camera: PerspectiveCamera,
+  viewW: number,
+  viewH: number,
+): GroundBounds {
+  const liveElevation = params.camElevation;
+  params.camElevation = Math.min(ELEV_DRIFT_START, liveElevation);
+  placeIsometricCamera(camera, viewW, viewH);
+  const bounds = getVisibleGroundBounds(camera);
+  params.camElevation = liveElevation;
+  placeIsometricCamera(camera, viewW, viewH);
+  return bounds;
+}
+
+function getVisibleGroundBounds(camera: PerspectiveCamera): GroundBounds {
+  camera.updateMatrixWorld(true);
+
+  const samples: Array<[number, number]> = [
+    [-1, -1],
+    [1, -1],
+    [-1, 1],
+    [1, 1],
+    [-1, 0],
+    [1, 0],
+    [0, -1],
+    [0, 1],
+  ];
+
+  let maxRadius = 0;
+  let anyValid = false;
+  const near = new Vector3();
+  const far = new Vector3();
+  const dir = new Vector3();
+
+  for (const [nx, ny] of samples) {
+    near.set(nx, ny, -1).unproject(camera);
+    far.set(nx, ny, 1).unproject(camera);
+    dir.copy(far).sub(near);
+    if (Math.abs(dir.y) < 1e-8) continue;
+    const t = -near.y / dir.y;
+    if (t < 0) continue;
+    const x = near.x + dir.x * t;
+    const z = near.z + dir.z * t;
+    if (!Number.isFinite(x) || !Number.isFinite(z)) continue;
+    maxRadius = Math.max(maxRadius, Math.hypot(x, z));
+    anyValid = true;
+  }
+
+  if (!anyValid) {
+    const pad = params.hexEdge * 8;
+    return { minX: -pad, maxX: pad, minZ: -pad, maxZ: pad };
+  }
+
+  const R = maxRadius * FOOTPRINT_SAFETY + params.hexEdge * VIEW_PAD_HEXES;
+  return { minX: -R, maxX: R, minZ: -R, maxZ: R };
+}
+
+function buildHexPositions(
+  bounds: GroundBounds,
+  _camera: PerspectiveCamera,
+): Array<{ x: number; z: number }> {
+  const colW = SQRT3 * params.hexEdge;
+  const rowH = 1.5 * params.hexEdge;
+  const radius = Math.max(bounds.maxX, bounds.maxZ) + params.hexEdge;
+
+  const positions: Array<{ x: number; z: number }> = [];
+  const row0 = Math.floor(bounds.minZ / rowH);
+  const row1 = Math.ceil(bounds.maxZ / rowH);
+
+  for (let row = row0; row <= row1; row += 1) {
+    const odd = row % 2 !== 0;
+    const xOff = odd ? colW * 0.5 : 0;
+    const z = row * rowH;
+    const col0 = Math.floor((bounds.minX - xOff) / colW);
+    const col1 = Math.ceil((bounds.maxX - xOff) / colW);
+    for (let col = col0; col <= col1; col += 1) {
+      const x = col * colW + xOff;
+      if (Math.hypot(x, z) > radius) continue;
+      positions.push({ x, z });
+    }
+  }
+  return positions;
+}
+
+function placeIsometricCamera(
+  camera: PerspectiveCamera,
+  viewW: number,
+  viewH: number,
+  skipAspectPad = false,
+): void {
+  const elev = (params.camElevation * Math.PI) / 180;
+  const azim = (params.camAzimuth * Math.PI) / 180;
+  const aspect = viewW / Math.max(viewH, 1);
+  // The wide-viewport padding keeps the intro wave-sweep shot framed on
+  // ultra-wide monitors, but it can be several world units — far bigger than
+  // the sub-1-unit distances the zoom-in stages target, so it's skipped
+  // there entirely rather than fought with a subtraction that would just
+  // clamp back to a much larger distance on any normal 16:9 screen.
+  const dist = skipAspectPad
+    ? params.camDistance
+    : params.camDistance + Math.max(0, aspect - 1) * 8;
+
+  const y = Math.sin(elev) * dist;
+  const horiz = Math.cos(elev) * dist;
+  camera.position.set(
+    LOOK_AT.x + Math.sin(azim) * horiz,
+    LOOK_AT.y + y,
+    LOOK_AT.z + Math.cos(azim) * horiz,
+  );
+  camera.up.set(0, 1, 0);
+  camera.lookAt(LOOK_AT);
+  camera.fov = params.camFov;
+  camera.aspect = aspect;
+  camera.near = 0.1;
+  camera.far = 500;
+  camera.updateProjectionMatrix();
+  camera.updateMatrixWorld(true);
+}
+
+type DebugHandlers = {
+  onLights: () => void;
+  onCamera: () => void;
+  onHex: () => void;
+  onWave: () => void;
+  onBloom: () => void;
+  onDolly: () => void;
+};
+
+type SliderDef = {
+  label: string;
+  min: number;
+  max: number;
+  step: number;
+  get: () => number;
+  set: (value: number) => void;
+  onChange: () => void;
+};
+
+type PanelDef = {
+  title: string;
+  sliders: SliderDef[];
+};
+
+async function saveLoaderConfig(): Promise<boolean> {
+  const response = await fetch("/__save-loader-config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  return response.ok;
+}
+
+function mountDebugPanel(overlay: HTMLElement, handlers: DebugHandlers): HTMLElement {
+  if (!document.getElementById("loader-debug-style")) {
+    const style = document.createElement("style");
+    style.id = "loader-debug-style";
+    style.textContent = `
+      .loader-debug-bar {
+        position: absolute;
+        left: 12px;
+        right: 12px;
+        bottom: 12px;
+        z-index: 2;
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        align-content: flex-end;
+        gap: 8px;
+        pointer-events: none;
+      }
+      .loader-debug {
+        pointer-events: auto;
+        width: 168px;
+        max-height: min(50vh, 340px);
+        overflow: auto;
+        padding: 8px 10px 10px;
+        border: 1px solid rgba(220, 228, 240, 0.18);
+        border-radius: 10px;
+        background: rgba(8, 10, 14, 0.6);
+        backdrop-filter: blur(10px);
+        color: #d7dee8;
+        font: 11px/1.3 ui-sans-serif, system-ui, sans-serif;
+      }
+      .loader-debug.is-min {
+        width: auto;
+        max-height: none;
+        overflow: visible;
+        padding: 6px 8px;
+      }
+      .loader-debug-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 4px;
+        margin-bottom: 6px;
+      }
+      .loader-debug.is-min .loader-debug-head {
+        margin-bottom: 0;
+      }
+      .loader-debug-head p {
+        margin: 0;
+        font-size: 10px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: #9aa6b4;
+      }
+      .loader-debug-head .spacer {
+        flex: 1;
+      }
+      .loader-debug-toggle,
+      .loader-debug-save-btn {
+        width: 24px;
+        height: 22px;
+        padding: 0;
+        border: 1px solid rgba(220, 228, 240, 0.22);
+        border-radius: 6px;
+        background: rgba(232, 238, 245, 0.12);
+        color: #e8eef5;
+        font: 11px/1 ui-sans-serif, system-ui, sans-serif;
+        cursor: pointer;
+        flex-shrink: 0;
+      }
+      .loader-debug-toggle:hover,
+      .loader-debug-save-btn:hover {
+        background: rgba(232, 238, 245, 0.2);
+      }
+      .loader-debug-save-btn.is-saved { border-color: rgba(120, 220, 150, 0.6); color: #9df0b4; }
+      .loader-debug-save-btn.is-failed { border-color: rgba(240, 120, 120, 0.6); color: #f5a3a3; }
+      .loader-debug.is-min .loader-debug-body {
+        display: none;
+      }
+      .loader-debug label {
+        display: grid;
+        grid-template-columns: 1fr 44px;
+        gap: 6px;
+        align-items: center;
+        margin: 3px 0;
+      }
+      .loader-debug span { color: #8b96a4; }
+      .loader-debug b {
+        font-weight: 600;
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        color: #e8eef5;
+      }
+      .loader-debug input[type="range"] {
+        grid-column: 1 / -1;
+        width: 100%;
+        margin: 0 0 4px;
+        accent-color: #c5d0dc;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  const bar = document.createElement("div");
+  bar.className = "loader-debug-bar";
+  bar.addEventListener("pointerdown", (event) => event.stopPropagation());
+  bar.addEventListener("keydown", (event) => event.stopPropagation());
+
+  const buildPanel = (def: PanelDef): void => {
+    const panel = document.createElement("div");
+    panel.className = "loader-debug";
+
+    const head = document.createElement("div");
+    head.className = "loader-debug-head";
+    const title = document.createElement("p");
+    title.textContent = def.title;
+    const spacer = document.createElement("span");
+    spacer.className = "spacer";
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "loader-debug-toggle";
+    toggle.setAttribute("aria-expanded", "true");
+    toggle.setAttribute("aria-label", `Minimize ${def.title} settings`);
+    toggle.textContent = "–";
+    toggle.addEventListener("click", () => {
+      const minimized = panel.classList.toggle("is-min");
+      toggle.textContent = minimized ? "+" : "–";
+      toggle.setAttribute("aria-expanded", minimized ? "false" : "true");
+    });
+    const saveBtn = document.createElement("button");
+    saveBtn.type = "button";
+    saveBtn.className = "loader-debug-save-btn";
+    saveBtn.textContent = "💾";
+    saveBtn.title = "Save config";
+    saveBtn.addEventListener("click", async () => {
+      saveBtn.disabled = true;
+      saveBtn.classList.remove("is-saved", "is-failed");
+      try {
+        const ok = await saveLoaderConfig();
+        saveBtn.classList.add(ok ? "is-saved" : "is-failed");
+      } catch {
+        saveBtn.classList.add("is-failed");
+      } finally {
+        saveBtn.disabled = false;
+        window.setTimeout(() => {
+          saveBtn.classList.remove("is-saved", "is-failed");
+        }, 1800);
+      }
+    });
+    head.append(title, spacer, toggle, saveBtn);
+    panel.appendChild(head);
+
+    const body = document.createElement("div");
+    body.className = "loader-debug-body";
+    panel.appendChild(body);
+
+    for (const s of def.sliders) {
+      const wrap = document.createElement("label");
+      const name = document.createElement("span");
+      name.textContent = s.label;
+      const valueEl = document.createElement("b");
+      const input = document.createElement("input");
+      input.type = "range";
+      input.min = String(s.min);
+      input.max = String(s.max);
+      input.step = String(s.step);
+      input.value = String(s.get());
+      const format = (n: number) => (s.step >= 1 ? String(Math.round(n)) : n.toFixed(3));
+      valueEl.textContent = format(s.get());
+      input.addEventListener("input", () => {
+        s.set(Number(input.value));
+        const applied = s.get();
+        input.value = String(applied);
+        valueEl.textContent = format(applied);
+        s.onChange();
       });
-    }
-  }
-  markEdgeChargeLayers(cells, width, height);
-  return cells;
-}
-
-/** Tag hexes in the outer N rings measured from the viewport edge. */
-function markEdgeChargeLayers(
-  cells: HexCell[],
-  width: number,
-  height: number,
-): void {
-  const pitch = (LOADING_COL_W + LOADING_ROW_H) * 0.5;
-  for (const cell of cells) {
-    const dist = Math.min(
-      cell.x,
-      cell.y,
-      width - cell.x,
-      height - cell.y,
-    );
-    const layer = Math.floor(Math.max(0, dist) / Math.max(pitch, 0.0001));
-    cell.edgeLayer = layer < EDGE_CHARGE_LAYERS ? layer : -1;
-    cell.drain = 0;
-    cell.passList = null;
-  }
-}
-
-/**
- * Bind each charged edge hex to nearby snake paths.
- * When any bound snake's tail moves past the contact distance, the hex drains.
- */
-function bindEdgeDrainToSnakes(cells: HexCell[], snakes: Snake[]): void {
-  // Hex centers sit off the gap-lattice paths — reach across a couple cells.
-  const radius =
-    Math.max(LOADING_COL_W, LOADING_ROW_H) * 1.85 + HEX_SIZE_PX;
-  const r2 = radius * radius;
-
-  for (const cell of cells) {
-    if (cell.edgeLayer < 0) continue;
-    const hits: Array<{ s: number; d: number }> = [];
-
-    for (let s = 0; s < snakes.length; s += 1) {
-      const { xs, ys, cum } = snakes[s];
-      let best = Infinity;
-
-      for (let i = 0; i < xs.length; i += 1) {
-        const dx = cell.x - xs[i];
-        const dy = cell.y - ys[i];
-        if (dx * dx + dy * dy > r2) continue;
-        if (cum[i] < best) best = cum[i];
-      }
-      for (let i = 1; i < xs.length; i += 1) {
-        const mx = (xs[i - 1] + xs[i]) * 0.5;
-        const my = (ys[i - 1] + ys[i]) * 0.5;
-        const dx = cell.x - mx;
-        const dy = cell.y - my;
-        if (dx * dx + dy * dy > r2) continue;
-        const midCum = (cum[i - 1] + cum[i]) * 0.5;
-        if (midCum < best) best = midCum;
-      }
-
-      if (best < Infinity) hits.push({ s, d: best });
+      wrap.append(name, valueEl, input);
+      body.appendChild(wrap);
     }
 
-    cell.passList = hits.length > 0 ? hits : null;
-  }
-}
-
-/**
- * Drain charged hexes once any bound snake's tail has moved past them.
- */
-function updateEdgeDrain(cells: HexCell[], snakes: Snake[], t: number): void {
-  if (t >= TRAVEL_MS) {
-    for (const cell of cells) {
-      if (cell.edgeLayer >= 0) cell.drain = 1;
-    }
-    return;
-  }
-
-  const tailDists = new Float32Array(snakes.length);
-  for (let s = 0; s < snakes.length; s += 1) {
-    const snake = snakes[s];
-    const local = (t - snake.delay) / snake.duration;
-    if (local <= 0) {
-      tailDists[s] = -1;
-      continue;
-    }
-    const p = local >= 1 ? 1 : easeInOutCubic(local);
-    const headDist = p * snake.total;
-    tailDists[s] = Math.max(0, headDist - SNAKE_LEN_PX);
-  }
-
-  for (const cell of cells) {
-    if (cell.edgeLayer < 0 || cell.drain >= 1) continue;
-    const list = cell.passList;
-    if (!list) continue;
-
-    let passed = false;
-    for (let i = 0; i < list.length; i += 1) {
-      const { s, d } = list[i];
-      const tailDist = tailDists[s];
-      // Strictly past: spawn hexes (d≈0) wait until the tail starts moving.
-      if (tailDist > d) {
-        passed = true;
-        break;
-      }
-    }
-    if (!passed) continue;
-    cell.drain = Math.min(1, cell.drain + EDGE_DRAIN_PER_FRAME);
-  }
-}
-
-/** Accent-charged edge hex → base fill as drain goes 0→1. */
-function cellFillStyle(
-  cell: HexCell,
-  accentRgb: [number, number, number],
-): string {
-  if (cell.edgeLayer < 0 || cell.drain >= 0.995) {
-    return hexFillColor(cell.tint);
-  }
-  const base = cssToRgb(hexFillColor(cell.tint));
-  const u = cell.drain;
-  const r = Math.round(accentRgb[0] + (base[0] - accentRgb[0]) * u);
-  const g = Math.round(accentRgb[1] + (base[1] - accentRgb[1]) * u);
-  const b = Math.round(accentRgb[2] + (base[2] - accentRgb[2]) * u);
-  return `rgb(${r},${g},${b})`;
-}
-
-function pickCenterHex(cells: HexCell[], width: number, height: number): HexCell {
-  const cx = width / 2;
-  const cy = height / 2;
-  if (cells.length === 0) {
-    return {
-      col: 0,
-      row: 0,
-      x: cx,
-      y: cy,
-      tint: 0,
-      edgeLayer: -1,
-      drain: 1,
-      passList: null,
-    };
-  }
-  let best = cells[0];
-  let bestD = Infinity;
-  for (const cell of cells) {
-    const d = (cell.x - cx) ** 2 + (cell.y - cy) ** 2;
-    if (d < bestD) {
-      bestD = d;
-      best = cell;
-    }
-  }
-  return best;
-}
-
-function cellKey(col: number, row: number): string {
-  return `${col},${row}`;
-}
-
-function nodeKey(x: number, y: number): string {
-  return `${Math.round(x * NODE_QUANT)},${Math.round(y * NODE_QUANT)}`;
-}
-
-function neighborOffsets(row: number): Array<[number, number]> {
-  return row % 2 === 0
-    ? [
-        [1, 0],
-        [-1, 0],
-        [0, -1],
-        [-1, -1],
-        [0, 1],
-        [-1, 1],
-      ]
-    : [
-        [1, 0],
-        [-1, 0],
-        [1, -1],
-        [0, -1],
-        [1, 1],
-        [0, 1],
-      ];
-}
-
-function buildGapGraph(
-  width: number,
-  height: number,
-  center: HexCell,
-): { nodes: GraphNode[]; goals: Set<number>; hexVerts: Map<string, number[]> } {
-  const cols = Math.ceil(width / LOADING_COL_W) + 4;
-  const rows = Math.ceil(height / LOADING_ROW_H) + 4;
-  const indexOf = new Map<string, number>();
-  const nodes: GraphNode[] = [];
-  const hexVerts = new Map<string, number[]>();
-
-  const intern = (x: number, y: number): number => {
-    const key = nodeKey(x, y);
-    const existing = indexOf.get(key);
-    if (existing !== undefined) return existing;
-    const id = nodes.length;
-    indexOf.set(key, id);
-    nodes.push({ x, y, nbs: [] });
-    return id;
+    bar.appendChild(panel);
   };
 
-  const link = (a: number, b: number) => {
-    if (a === b) return;
-    if (!nodes[a].nbs.includes(b)) nodes[a].nbs.push(b);
-    if (!nodes[b].nbs.includes(a)) nodes[b].nbs.push(a);
-  };
-
-  for (let row = -2; row < rows; row += 1) {
-    for (let col = -2; col < cols; col += 1) {
-      const { x, y } = loadingHexCenter(col, row);
-      const ids = new Array<number>(6);
-      for (let i = 0; i < 6; i += 1) {
-        const a = hexVertexAngle(i);
-        ids[i] = intern(
-          x + LOADING_RING_R * Math.cos(a),
-          y + LOADING_RING_R * Math.sin(a),
-        );
-      }
-      for (let i = 0; i < 6; i += 1) {
-        link(ids[i], ids[(i + 1) % 6]);
-      }
-      hexVerts.set(cellKey(col, row), ids);
-    }
-  }
-
-  const bridge = LOADING_ROW_H * 0.85;
-  for (const [key, ids] of hexVerts) {
-    const comma = key.indexOf(",");
-    const col = Number(key.slice(0, comma));
-    const row = Number(key.slice(comma + 1));
-    for (const [dc, dr] of neighborOffsets(row)) {
-      const nIds = hexVerts.get(cellKey(col + dc, row + dr));
-      if (!nIds) continue;
-      for (let i = 0; i < 6; i += 1) {
-        let best = -1;
-        let bestD = bridge;
-        const ax = nodes[ids[i]].x;
-        const ay = nodes[ids[i]].y;
-        for (let j = 0; j < 6; j += 1) {
-          const d = Math.hypot(ax - nodes[nIds[j]].x, ay - nodes[nIds[j]].y);
-          if (d > 0.45 && d < bestD) {
-            bestD = d;
-            best = j;
-          }
-        }
-        if (best >= 0) link(ids[i], nIds[best]);
-      }
-    }
-  }
-
-  const centerIds = hexVerts.get(cellKey(center.col, center.row)) ?? [];
-  return { nodes, goals: new Set(centerIds), hexVerts };
-}
-
-function spawnSnakes(
-  nodes: GraphNode[],
-  goals: Set<number>,
-  hexVerts: Map<string, number[]>,
-  cells: HexCell[],
-  center: HexCell,
-): Snake[] {
-  const starts = pickEdgeSpawnNodes(nodes, hexVerts, cells);
-  const snakes: Snake[] = [];
-  const goalList = [...goals];
-
-  for (let s = 0; s < starts.length; s += 1) {
-    const start = starts[s];
-    const spawn = nodes[start];
-    const goal =
-      nearestGoal(spawn, goalList, nodes) ??
-      goalList[s % Math.max(1, goalList.length)];
-    const pathIds =
-      (goal !== undefined
-        ? bfsPath(nodes, start, new Set([goal]), s + 1)
-        : null) ?? bfsPath(nodes, start, goals, s + 1);
-    if (!pathIds || pathIds.length < 2) continue;
-
-    // Extend into the center hex so snakes visually enter it.
-    const pts: Array<{ x: number; y: number }> = pathIds.map((id) => ({
-      x: nodes[id].x,
-      y: nodes[id].y,
-    }));
-    const last = pts[pts.length - 1];
-    const midX = last.x + (center.x - last.x) * 0.55;
-    const midY = last.y + (center.y - last.y) * 0.55;
-    pts.push({ x: midX, y: midY });
-    pts.push({ x: center.x, y: center.y });
-
-    const xs = new Float32Array(pts.length);
-    const ys = new Float32Array(pts.length);
-    const cum = new Float32Array(pts.length);
-    for (let i = 0; i < pts.length; i += 1) {
-      xs[i] = pts[i].x;
-      ys[i] = pts[i].y;
-      if (i > 0) {
-        cum[i] =
-          cum[i - 1] + Math.hypot(xs[i] - xs[i - 1], ys[i] - ys[i - 1]);
-      }
-    }
-    const delay =
-      (s / Math.max(1, SNAKE_COUNT - 1)) * MAX_STAGGER_MS * 0.35 +
-      Math.random() * MAX_STAGGER_MS * 0.65;
-    snakes.push({
-      xs,
-      ys,
-      cum,
-      total: Math.max(cum[cum.length - 1], 1),
-      delay,
-      duration: TRAVEL_MS - delay,
-    });
-  }
-  return snakes;
-}
-
-function pickEdgeSpawnNodes(
-  nodes: GraphNode[],
-  hexVerts: Map<string, number[]>,
-  cells: HexCell[],
-): number[] {
-  if (cells.length === 0) return [];
-
-  let minX = Infinity;
-  let maxX = -Infinity;
-  let minY = Infinity;
-  let maxY = -Infinity;
-  for (const cell of cells) {
-    if (cell.x < minX) minX = cell.x;
-    if (cell.x > maxX) maxX = cell.x;
-    if (cell.y < minY) minY = cell.y;
-    if (cell.y > maxY) maxY = cell.y;
-  }
-
-  const bandX = LOADING_COL_W * 0.8;
-  const bandY = LOADING_ROW_H * 0.8;
-  const buckets: HexCell[][] = [[], [], [], []];
-  for (const cell of cells) {
-    const dTop = cell.y - minY;
-    const dRight = maxX - cell.x;
-    const dBottom = maxY - cell.y;
-    const dLeft = cell.x - minX;
-    const nearest = Math.min(dTop, dRight, dBottom, dLeft);
-    if (nearest === dTop && dTop <= bandY) buckets[0].push(cell);
-    else if (nearest === dRight && dRight <= bandX) buckets[1].push(cell);
-    else if (nearest === dBottom && dBottom <= bandY) buckets[2].push(cell);
-    else if (nearest === dLeft && dLeft <= bandX) buckets[3].push(cell);
-  }
-
-  const counts = splitCounts(SNAKE_COUNT, [1, 1, 1, 1]);
-  const outward: Array<(n: GraphNode) => number> = [
-    (n) => -n.y,
-    (n) => n.x,
-    (n) => n.y,
-    (n) => -n.x,
-  ];
-  const along: Array<(c: HexCell) => number> = [
-    (c) => c.x,
-    (c) => c.y,
-    (c) => c.x,
-    (c) => c.y,
+  const panels: PanelDef[] = [
+    {
+      title: "Hex",
+      sliders: [
+        { label: "Edge", min: 0.3, max: 3, step: 0.01, get: () => params.hexEdge, set: (v) => { params.hexEdge = v; }, onChange: handlers.onHex },
+        { label: "Height", min: 0.05, max: 2, step: 0.01, get: () => params.hexHeight, set: (v) => { params.hexHeight = v; }, onChange: handlers.onHex },
+        { label: "Gap", min: 0, max: 0.8, step: 0.01, get: () => params.hexGap, set: (v) => { params.hexGap = v; }, onChange: handlers.onHex },
+        { label: "Center Edge", min: 0.3, max: 3, step: 0.01, get: () => params.centerHexEdge, set: (v) => { params.centerHexEdge = v; }, onChange: handlers.onHex },
+      ],
+    },
+    {
+      title: "Camera",
+      sliders: [
+        { label: "Exposure", min: 0, max: 3, step: 0.01, get: () => params.exposure, set: (v) => { params.exposure = v; }, onChange: handlers.onLights },
+        { label: "Distance", min: 6, max: 80, step: 0.5, get: () => params.camDistance, set: (v) => { params.camDistance = v; }, onChange: handlers.onCamera },
+        { label: "Elevation °", min: 10, max: 85, step: 0.5, get: () => params.camElevation, set: (v) => { params.camElevation = v; }, onChange: handlers.onCamera },
+        { label: "Azimuth °", min: 0, max: 360, step: 0.5, get: () => params.camAzimuth, set: (v) => { params.camAzimuth = v; }, onChange: handlers.onCamera },
+      ],
+    },
+    {
+      title: "Wave",
+      sliders: [
+        { label: "Width", min: 0.5, max: 10, step: 0.1, get: () => params.waveWidth, set: (v) => { params.waveWidth = v; }, onChange: handlers.onWave },
+        { label: "Intensity", min: 0.1, max: 3, step: 0.05, get: () => params.waveIntensity, set: (v) => { params.waveIntensity = v; }, onChange: handlers.onWave },
+        { label: "Speed", min: 1, max: 40, step: 0.5, get: () => params.waveSpeed, set: (v) => { params.waveSpeed = v; }, onChange: handlers.onWave },
+      ],
+    },
+    {
+      title: "Rise",
+      sliders: [
+        { label: "Rise factor", min: 0, max: 5, step: 0.05, get: () => params.riseFactor, set: (v) => { params.riseFactor = v; }, onChange: handlers.onWave },
+        { label: "Speed", min: 1, max: 20, step: 0.5, get: () => params.riseSpeed, set: (v) => { params.riseSpeed = v; }, onChange: handlers.onWave },
+      ],
+    },
+    {
+      title: "Bloom",
+      sliders: [
+        { label: "Radius", min: 0, max: 1, step: 0.01, get: () => params.bloomRadius, set: (v) => { params.bloomRadius = v; }, onChange: handlers.onBloom },
+        { label: "Threshold", min: 0, max: 1, step: 0.01, get: () => params.bloomThreshold, set: (v) => { params.bloomThreshold = v; }, onChange: handlers.onBloom },
+      ],
+    },
+    {
+      title: "Dolly",
+      sliders: [
+        { label: "Speed", min: 0.2, max: 5, step: 0.05, get: () => params.dollySpeed, set: (v) => { params.dollySpeed = v; }, onChange: handlers.onDolly },
+      ],
+    },
   ];
 
-  const picked: number[] = [];
-  const used = new Set<number>();
+  for (const def of panels) buildPanel(def);
 
-  for (let edge = 0; edge < 4; edge += 1) {
-    const hexes = [...buckets[edge]].sort(
-      (a, b) => along[edge](a) - along[edge](b),
-    );
-    const chosen = spacedItems(hexes, counts[edge]);
-    for (const hex of chosen) {
-      const ids = hexVerts.get(cellKey(hex.col, hex.row));
-      if (!ids) continue;
-      let best = -1;
-      let bestScore = -Infinity;
-      for (const id of ids) {
-        if (used.has(id)) continue;
-        const score = outward[edge](nodes[id]);
-        if (score > bestScore) {
-          bestScore = score;
-          best = id;
-        }
-      }
-      if (best < 0 || used.has(best)) continue;
-      used.add(best);
-      picked.push(best);
-    }
-  }
-
-  if (picked.length < SNAKE_COUNT) {
-    const extras = [...cells].sort((a, b) => {
-      const da = Math.min(a.y - minY, maxY - a.y, a.x - minX, maxX - a.x);
-      const db = Math.min(b.y - minY, maxY - b.y, b.x - minX, maxX - b.x);
-      return da - db;
-    });
-    for (const hex of extras) {
-      if (picked.length >= SNAKE_COUNT) break;
-      const ids = hexVerts.get(cellKey(hex.col, hex.row));
-      if (!ids) continue;
-      for (const id of ids) {
-        if (used.has(id)) continue;
-        used.add(id);
-        picked.push(id);
-        break;
-      }
-    }
-  }
-
-  return picked.slice(0, SNAKE_COUNT);
-}
-
-function spacedItems<T>(items: T[], count: number): T[] {
-  if (items.length === 0 || count <= 0) return [];
-  if (items.length <= count) return items;
-  const picks: T[] = [];
-  const seen = new Set<number>();
-  for (let k = 0; k < count; k += 1) {
-    const t = count === 1 ? 0.5 : k / (count - 1);
-    let idx = Math.round(t * (items.length - 1));
-    while (seen.has(idx) && idx < items.length - 1) idx += 1;
-    while (seen.has(idx) && idx > 0) idx -= 1;
-    if (seen.has(idx)) continue;
-    seen.add(idx);
-    picks.push(items[idx]);
-  }
-  return picks;
-}
-
-function splitCounts(total: number, weights: number[]): number[] {
-  const sum = weights.reduce((a, b) => a + b, 0) || 1;
-  const raw = weights.map((w) => (total * w) / sum);
-  const counts = raw.map((v) => Math.floor(v));
-  const remain = total - counts.reduce((a, b) => a + b, 0);
-  const order = raw
-    .map((v, i) => ({ i, frac: v - Math.floor(v) }))
-    .sort((a, b) => b.frac - a.frac);
-  for (let k = 0; k < remain; k += 1) counts[order[k % order.length].i] += 1;
-  return counts;
-}
-
-function nearestGoal(
-  spawn: GraphNode,
-  goalList: number[],
-  nodes: GraphNode[],
-): number | null {
-  if (goalList.length === 0) return null;
-  let best = goalList[0];
-  let bestD = Infinity;
-  for (const id of goalList) {
-    const g = nodes[id];
-    const d = (g.x - spawn.x) ** 2 + (g.y - spawn.y) ** 2;
-    if (d < bestD) {
-      bestD = d;
-      best = id;
-    }
-  }
-  return best;
-}
-
-function bfsPath(
-  nodes: GraphNode[],
-  start: number,
-  goals: Set<number>,
-  salt = 1,
-): number[] | null {
-  if (goals.has(start)) return [start];
-  const prev = new Int32Array(nodes.length).fill(-1);
-  const seen = new Uint8Array(nodes.length);
-  const q = [start];
-  seen[start] = 1;
-  let qi = 0;
-  while (qi < q.length) {
-    const u = q[qi++];
-    const nbs = nodes[u].nbs;
-    const len = nbs.length;
-    const rot = len > 0 ? (u * 13 + salt * 7) % len : 0;
-    for (let k = 0; k < len; k += 1) {
-      const v = nbs[(k + rot) % len];
-      if (seen[v]) continue;
-      seen[v] = 1;
-      prev[v] = u;
-      if (goals.has(v)) {
-        const path = [v];
-        let cur = v;
-        while (cur !== start) {
-          cur = prev[cur];
-          path.push(cur);
-        }
-        path.reverse();
-        return path;
-      }
-      q.push(v);
-    }
-  }
-  return null;
-}
-
-function cssToRgb(color: string): [number, number, number] {
-  const hex = color.trim();
-  if (hex.startsWith("#")) {
-    const raw = hex.slice(1);
-    if (raw.length === 3) {
-      return [
-        parseInt(raw[0] + raw[0], 16),
-        parseInt(raw[1] + raw[1], 16),
-        parseInt(raw[2] + raw[2], 16),
-      ];
-    }
-    if (raw.length >= 6) {
-      return [
-        parseInt(raw.slice(0, 2), 16),
-        parseInt(raw.slice(2, 4), 16),
-        parseInt(raw.slice(4, 6), 16),
-      ];
-    }
-  }
-  const probe = document.createElement("canvas").getContext("2d");
-  if (!probe) return [42, 40, 47];
-  probe.fillStyle = color;
-  const m = String(probe.fillStyle).match(/(\d+),\s*(\d+),\s*(\d+)/);
-  if (!m) return [42, 40, 47];
-  return [Number(m[1]), Number(m[2]), Number(m[3])];
-}
-
-function easeInOutCubic(t: number): number {
-  return t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
-}
-
-function sampleAt(
-  snake: Snake,
-  dist: number,
-  out: Vec,
-): void {
-  const { xs, ys, cum, total } = snake;
-  if (total <= 0 || xs.length === 0) {
-    out.x = xs[0] ?? 0;
-    out.y = ys[0] ?? 0;
-    return;
-  }
-  const d = dist < 0 ? 0 : dist > total ? total : dist;
-  let lo = 0;
-  let hi = cum.length - 1;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (cum[mid] < d) lo = mid + 1;
-    else hi = mid;
-  }
-  const i = Math.max(1, lo);
-  const span = cum[i] - cum[i - 1];
-  const u = span > 0.0001 ? (d - cum[i - 1]) / span : 0;
-  out.x = xs[i - 1] + (xs[i] - xs[i - 1]) * u;
-  out.y = ys[i - 1] + (ys[i] - ys[i - 1]) * u;
-}
-
-function pointInHex(px: number, py: number, cx: number, cy: number, r: number): boolean {
-  const dx = (px - cx) / r;
-  const dy = (py - cy) / r;
-  const q = (SQRT3 / 3) * dx - (1 / 3) * dy;
-  const rr = (2 / 3) * dy;
-  const s = -q - rr;
-  return Math.max(Math.abs(q), Math.abs(rr), Math.abs(s)) <= 1.02;
-}
-/**
- * One Path2D hex lattice; layers apply rotate + translate at draw time.
- * Vector strokes stay sharp at any zoom (unlike a scaled bitmap).
- * Ember rows are stored per edge and only drawn when that snake is on-screen.
- */
-function buildCenterMesh(center: HexCell): CenterMesh {
-  const clipR = HEX_SIZE_PX * 0.98;
-  const { path, edges } = buildHexGridLayer(
-    center.x,
-    center.y,
-    clipR,
-    MESH_CELL_PX,
-    MESH_GAP_R,
-  );
-  return {
-    path,
-    edges,
-    gapR: MESH_GAP_R,
-    clipR,
-    cell: MESH_CELL_PX,
-  };
-}
-
-function buildHexGridLayer(
-  cx: number,
-  cy: number,
-  clipR: number,
-  cell: number,
-  gapR: number,
-): { path: Path2D; edges: MeshEdgeEmber[] } {
-  const path = new Path2D();
-  const edges: MeshEdgeEmber[] = [];
-  const colW = SQRT3 * cell;
-  const rowH = 1.5 * cell;
-  const span = Math.ceil((clipR * 2.2) / cell) + 2;
-  const seen = new Set<string>();
-  const quant = (v: number) => Math.round(v * 1000);
-  const font = MESH_SNAKE_WIDTH_PX / 5.4;
-  // Slightly wider spacing → fewer glyphs, still reads as dense rows when zoomed.
-  const gap = Math.max(font * 1.35, MESH_SNAKE_WIDTH_PX * 0.28);
-
-  const addEdge = (x0: number, y0: number, x1: number, y1: number) => {
-    const d0 = Math.hypot(x0 - cx, y0 - cy);
-    const d1 = Math.hypot(x1 - cx, y1 - cy);
-    if (d0 < gapR && d1 < gapR) return;
-    if (
-      !pointInHex(x0, y0, cx, cy, clipR) ||
-      !pointInHex(x1, y1, cx, cy, clipR)
-    ) {
-      return;
-    }
-
-    const qa0 = quant(x0);
-    const qb0 = quant(y0);
-    const qa1 = quant(x1);
-    const qb1 = quant(y1);
-    const key =
-      qa0 < qa1 || (qa0 === qa1 && qb0 <= qb1)
-        ? `${qa0},${qb0}:${qa1},${qb1}`
-        : `${qa1},${qb1}:${qa0},${qb0}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    path.moveTo(x0, y0);
-    path.lineTo(x1, y1);
-
-    const dx = x1 - x0;
-    const dy = y1 - y0;
-    const len = Math.hypot(dx, dy);
-    if (len < 0.0001) return;
-    const ux = dx / len;
-    const uy = dy / len;
-    const slots = Math.max(1, Math.round(len / gap));
-    const chars = new Uint16Array(MESH_EMBER_LINES * slots);
-    for (let i = 0; i < chars.length; i += 1) {
-      chars[i] = randomEmberCharIndex();
-    }
-    edges.push({
-      x0,
-      y0,
-      x1,
-      y1,
-      len,
-      angle: Math.atan2(dy, dx),
-      ux,
-      uy,
-      nx: -uy,
-      ny: ux,
-      slots,
-      chars,
-    });
-  };
-
-  for (let row = -span; row <= span; row += 1) {
-    const offset = row % 2 === 0 ? 0 : colW / 2;
-    for (let col = -span; col <= span; col += 1) {
-      const hx = cx + col * colW + offset;
-      const hy = cy + row * rowH;
-      if (!pointInHex(hx, hy, cx, cy, clipR + cell * 0.45)) continue;
-
-      for (let i = 0; i < 6; i += 1) {
-        const keep =
-          ((col * 17 + row * 31 + i * 13) & 255) / 255 < MESH_EDGE_KEEP;
-        if (!keep) continue;
-        const a0 = hexVertexAngle(i);
-        const a1 = hexVertexAngle((i + 1) % 6);
-        addEdge(
-          hx + cell * Math.cos(a0),
-          hy + cell * Math.sin(a0),
-          hx + cell * Math.cos(a1),
-          hy + cell * Math.sin(a1),
-        );
-      }
-    }
-  }
-
-  return { path, edges };
-}
-
-/** In-place ember flicker (no fall) — same rate as dustScene streams. */
-function flickerEdgeChars(chars: Uint16Array): void {
-  for (let i = 0; i < chars.length; i += 1) {
-    if (Math.random() < MESH_EMBER_FLICKER) {
-      chars[i] = randomEmberCharIndex();
-    }
-  }
-}
-
-/**
- * 0 → solid mesh snakes; 1 → full ember character rows.
- * Triggers only once the inner mesh snakes dominate the screen.
- */
-function meshEmberMorph(zoom: number): number {
-  const snakePx = MESH_SNAKE_WIDTH_PX * zoom;
-  return Math.min(
-    1,
-    Math.max(
-      0,
-      (snakePx - MESH_EMBER_MORPH_START_PX) /
-        (MESH_EMBER_MORPH_FULL_PX - MESH_EMBER_MORPH_START_PX),
-    ),
-  );
-}
-
-/** Pre-rasterized glyphs — drawImage is far cheaper than fillText under zoom. */
-function createEmberAtlas(fill: string): EmberAtlas {
-  const cols = EMBER_ATLAS_COLS;
-  const cell = EMBER_ATLAS_CELL;
-  const rows = Math.ceil(EMBER_CHARACTERS.length / cols);
-  const canvas = document.createElement("canvas");
-  canvas.width = cols * cell;
-  canvas.height = rows * cell;
-  const c = canvas.getContext("2d");
-  if (c) {
-    c.clearRect(0, 0, canvas.width, canvas.height);
-    c.fillStyle = fill;
-    c.textAlign = "center";
-    c.textBaseline = "middle";
-    c.font = `700 ${Math.floor(cell * 0.62)}px ${EMBER_FONT_STACK}`;
-    for (let i = 0; i < EMBER_CHARACTERS.length; i += 1) {
-      const col = i % cols;
-      const row = (i / cols) | 0;
-      c.fillText(
-        EMBER_CHARACTERS[i],
-        col * cell + cell * 0.5,
-        row * cell + cell * 0.5 + cell * 0.04,
-      );
-    }
-  }
-  return { canvas, cell, cols };
-}
-
-function worldToScreen(
-  wx: number,
-  wy: number,
-  cx: number,
-  cy: number,
-  zoom: number,
-  width: number,
-  height: number,
-): Vec {
-  return {
-    x: (wx - cx) * zoom + width * 0.5,
-    y: (wy - cy) * zoom + height * 0.5,
-  };
-}
-
-/** Unique corridor runs as continuous polylines (not one subpath per edge). */
-function buildUniqueLaserPath(
-  snakes: Snake[],
-  settled: boolean,
-  t: number,
-  sample: Vec,
-): Path2D {
-  const path = new Path2D();
-  const seen = new Set<string>();
-  const tip = { x: 0, y: 0 };
-
-  for (const snake of snakes) {
-    let headDist: number;
-    if (settled) {
-      headDist = snake.total;
-    } else {
-      const local = (t - snake.delay) / snake.duration;
-      if (local <= 0) continue;
-      const p = local >= 1 ? 1 : easeInOutCubic(local);
-      headDist = p * snake.total;
-    }
-    const tailDist = Math.max(0, headDist - SNAKE_LEN_PX);
-    if (headDist <= 0.01) continue;
-
-    const { xs, ys, cum } = snake;
-    sampleAt(snake, tailDist, sample);
-    let prevX = sample.x;
-    let prevY = sample.y;
-    let inRun = false;
-
-    let i = 1;
-    while (i < cum.length && cum[i] < tailDist) i += 1;
-    for (; i < cum.length && cum[i] <= headDist; i += 1) {
-      inRun = appendUniqueRun(
-        path,
-        seen,
-        prevX,
-        prevY,
-        xs[i],
-        ys[i],
-        inRun,
-      );
-      prevX = xs[i];
-      prevY = ys[i];
-    }
-    sampleAt(snake, headDist, tip);
-    appendUniqueRun(path, seen, prevX, prevY, tip.x, tip.y, inRun);
-  }
-
-  return path;
-}
-
-/** @returns whether a continuous run is active after this edge */
-function appendUniqueRun(
-  path: Path2D,
-  seen: Set<string>,
-  x0: number,
-  y0: number,
-  x1: number,
-  y1: number,
-  inRun: boolean,
-): boolean {
-  if (Math.hypot(x1 - x0, y1 - y0) < 0.05) return inRun;
-  const q = 4;
-  const a0 = Math.round(x0 * q);
-  const b0 = Math.round(y0 * q);
-  const a1 = Math.round(x1 * q);
-  const b1 = Math.round(y1 * q);
-  const key =
-    a0 < a1 || (a0 === a1 && b0 <= b1)
-      ? `${a0},${b0}:${a1},${b1}`
-      : `${a1},${b1}:${a0},${b0}`;
-  if (seen.has(key)) return false;
-  seen.add(key);
-  if (!inRun) path.moveTo(x0, y0);
-  path.lineTo(x1, y1);
-  return true;
-}
-
-function cameraZoom(t: number, zoomMax: number, zoomEmber: number): number {
-  if (t < ZOOM_START_MS) return 1;
-
-  const emberZ = Math.min(zoomEmber, zoomMax);
-
-  // Ease into ember framing, then hold (page reveals underneath).
-  if (t < EMBER_HOLD_START_MS) {
-    const p = Math.min(1, (t - ZOOM_START_MS) / ZOOM_IN_MS);
-    return 1 + (emberZ - 1) * easeInOutCubic(p);
-  }
-
-  return emberZ;
-}
-
-/**
- * 0 while zooming into the ember mesh; then a slow 0→1 clear of the canvas fill.
- * Embers stay drawn — only the blackish cover goes away.
- */
-function pageRevealAmount(t: number): number {
-  if (t < BG_FADE_START_MS) return 0;
-  const p = Math.min(1, (t - BG_FADE_START_MS) / BG_FADE_MS);
-  return easeInOutCubic(p);
-}
-
-/** After the bg is clear, ease remaining mesh/ember graphics out. */
-function graphicsFadeAmount(t: number): number {
-  if (t < FADE_START_MS) return 1;
-  const p = Math.min(1, (t - FADE_START_MS) / FADE_MS);
-  return 1 - easeInOutCubic(p);
-}
-
-/** Zoom level where the center hex roughly fills the viewport. */
-function zoomHexFill(width: number, height: number): number {
-  return Math.min(width, height) / (2 * HEX_SIZE_PX);
-}
-
-/** Drop hex cells that no longer intersect the viewport under the current zoom. */
-function cullVisibleCells(
-  cells: HexCell[],
-  center: HexCell,
-  zoom: number,
-  width: number,
-  height: number,
-): HexCell[] {
-  if (zoom >= zoomHexFill(width, height) * 1.05) return [center];
-
-  const margin = HEX_SIZE_PX * zoom * 1.4;
-  const next: HexCell[] = [];
-  for (const cell of cells) {
-    if (cell === center) {
-      next.push(cell);
-      continue;
-    }
-    const sx = (cell.x - center.x) * zoom + width * 0.5;
-    const sy = (cell.y - center.y) * zoom + height * 0.5;
-    if (
-      sx >= -margin &&
-      sx <= width + margin &&
-      sy >= -margin &&
-      sy <= height + margin
-    ) {
-      next.push(cell);
-    }
-  }
-  return next;
-}
-
-function drawFrame(
-  ctx: CanvasRenderingContext2D,
-  args: {
-    t: number;
-    width: number;
-    height: number;
-    bg: string;
-    bgRgb: [number, number, number];
-    accent: string;
-    accentRgb: [number, number, number];
-    cells: HexCell[];
-    center: HexCell;
-    snakes: Snake[];
-    mesh: CenterMesh;
-    emberAtlas: EmberAtlas;
-    settledSnakes: Path2D | null;
-    zoomMax: number;
-    zoomEmber: number;
-    pageReveal: number;
-    graphicsFade: number;
-    sample: Vec;
-  },
-): void {
-  const {
-    t,
-    width,
-    height,
-    bgRgb,
-    accentRgb,
-    cells,
-    center,
-    snakes,
-    mesh,
-    emberAtlas,
-    settledSnakes,
-    zoomMax,
-    zoomEmber,
-    pageReveal,
-    graphicsFade,
-    sample,
-  } = args;
-
-  const zoom = cameraZoom(t, zoomMax, zoomEmber);
-  const emberMorph = meshEmberMorph(zoom);
-  const hexFillZ = zoomHexFill(width, height);
-  // Drop outer content before extreme scale makes laser multi-pass expensive.
-  const outerFade = Math.min(
-    1,
-    Math.max(0, 1 - (zoom / Math.max(hexFillZ * 0.85, 1) - 1) / 0.55),
-  );
-  const outerAlpha = Math.min(1 - emberMorph, outerFade) * graphicsFade;
-  // Blackish canvas cover — fades to transparent after the ember mesh fills the screen.
-  const bgAlpha = Math.max(0, 1 - pageReveal);
-
-  if (t < TRAVEL_MS + 40) {
-    updateEdgeDrain(cells, snakes, t);
-  }
-
-  ctx.clearRect(0, 0, width, height);
-  if (bgAlpha > 0.01) {
-    ctx.fillStyle = `rgba(${bgRgb[0]},${bgRgb[1]},${bgRgb[2]},${bgAlpha.toFixed(3)})`;
-    ctx.fillRect(0, 0, width, height);
-  }
-
-  // Outer hexes + lasers under camera scale — only while still on-screen / cheap.
-  if (outerAlpha > 0.01 && zoom < hexFillZ * 1.35) {
-    ctx.save();
-    ctx.translate(width * 0.5, height * 0.5);
-    ctx.scale(zoom, zoom);
-    ctx.translate(-center.x, -center.y);
-    ctx.globalAlpha = outerAlpha;
-
-    for (const cell of cells) {
-      if (cell === center && t >= TRAVEL_MS) continue;
-      ctx.fillStyle = cellFillStyle(cell, accentRgb);
-      traceHex(ctx, cell.x, cell.y, HEX_SIZE_PX);
-      ctx.fill();
-    }
-
-    if (settledSnakes && t >= TRAVEL_MS) {
-      // Fewer glow passes once zoomed — full bloom under scale is costly.
-      strokeLaserPath(
-        ctx,
-        settledSnakes,
-        accentRgb,
-        SNAKE_WIDTH_PX,
-        1,
-        zoom > 2.5 ? 2 : 6,
-      );
-    } else {
-      const lasers = buildUniqueLaserPath(snakes, false, t, sample);
-      strokeLaserPath(ctx, lasers, accentRgb, SNAKE_WIDTH_PX, 1, 6);
-    }
-
-    ctx.restore();
-  }
-
-  // Mesh + embers in *screen space* (no ctx.scale) so deep zoom stays cheap.
-  if (t >= TRAVEL_MS - 180 && graphicsFade > 0.01) {
-    const meshAlpha =
-      (t >= TRAVEL_MS
-        ? 1
-        : Math.max(0, (t - (TRAVEL_MS - 180)) / 180)) * graphicsFade;
-    drawCenterMesh(
-      ctx,
-      mesh,
-      emberAtlas,
-      center,
-      bgRgb,
-      accentRgb,
-      meshAlpha,
-      emberMorph,
-      pageReveal,
-      zoom,
-      width,
-      height,
-    );
-  }
-}
-
-/** Multi-pass laser look on a Path2D of unique edges. */
-function strokeLaserPath(
-  ctx: CanvasRenderingContext2D,
-  path: Path2D,
-  accentRgb: [number, number, number],
-  width: number,
-  alpha: number,
-  passes = 6,
-): void {
-  paintLaserPasses(ctx, path, accentRgb, width, alpha, passes);
-}
-
-/**
- * Wide soft haze with butt caps (avoids round-cap circles) + thin readable core.
- * Unique edges are stroked once so merges don't stack brightness.
- */
-function paintLaserPasses(
-  ctx: CanvasRenderingContext2D,
-  path: Path2D,
-  accentRgb: [number, number, number],
-  width: number,
-  alpha: number,
-  passes: number,
-): void {
-  const [ar, ag, ab] = accentRgb;
-  const midR = Math.min(255, Math.floor(ar * 1.08 + 10));
-  const midG = Math.min(255, Math.floor(ag * 1.04 + 5));
-  const midB = Math.min(255, Math.floor(ab * 1.04 + 5));
-  const coreR = Math.min(255, Math.floor(ar * 1.15 + 14));
-  const coreG = Math.min(255, Math.floor(ag * 1.08 + 6));
-  const coreB = Math.min(255, Math.floor(ab * 1.08 + 6));
-
-  ctx.save();
-  ctx.lineJoin = "round";
-  ctx.shadowBlur = 0;
-  ctx.globalCompositeOperation = "source-over";
-
-  if (passes >= 6) {
-    ctx.lineCap = "butt";
-    ctx.strokeStyle = `rgba(${ar},${ag},${ab},${(0.016 * alpha).toFixed(3)})`;
-    ctx.lineWidth = width * 28;
-    ctx.stroke(path);
-
-    ctx.strokeStyle = `rgba(${ar},${ag},${ab},${(0.028 * alpha).toFixed(3)})`;
-    ctx.lineWidth = width * 16;
-    ctx.stroke(path);
-
-    ctx.strokeStyle = `rgba(${ar},${ag},${ab},${(0.05 * alpha).toFixed(3)})`;
-    ctx.lineWidth = width * 8;
-    ctx.stroke(path);
-
-    ctx.strokeStyle = `rgba(${ar},${ag},${ab},${(0.1 * alpha).toFixed(3)})`;
-    ctx.lineWidth = width * 3.5;
-    ctx.stroke(path);
-  } else if (passes >= 2) {
-    ctx.lineCap = "butt";
-    ctx.strokeStyle = `rgba(${ar},${ag},${ab},${(0.06 * alpha).toFixed(3)})`;
-    ctx.lineWidth = width * 6;
-    ctx.stroke(path);
-  }
-
-  ctx.lineCap = "round";
-  ctx.strokeStyle = `rgba(${midR},${midG},${midB},${(0.8 * alpha).toFixed(3)})`;
-  ctx.lineWidth = width * 1.1;
-  ctx.stroke(path);
-
-  ctx.strokeStyle = `rgba(${coreR},${coreG},${coreB},${(0.92 * alpha).toFixed(3)})`;
-  ctx.lineWidth = width * 0.5;
-  ctx.stroke(path);
-
-  ctx.restore();
-}
-
-/**
- * Draw mesh layers in screen space: only visible edges, no ctx.scale.
- * Front mesh layers morph into ember glyphs; a hex border separates lasers.
- */
-function drawCenterMesh(
-  ctx: CanvasRenderingContext2D,
-  mesh: CenterMesh,
-  atlas: EmberAtlas,
-  center: HexCell,
-  bgRgb: [number, number, number],
-  accentRgb: [number, number, number],
-  alpha: number,
-  emberMorph: number,
-  pageReveal: number,
-  zoom: number,
-  width: number,
-  height: number,
-): void {
-  if (alpha < 0.01) return;
-  const [ar, ag, ab] = accentRgb;
-  const [br, bgc, bb] = bgRgb;
-  const last = MESH_LAYERS - 1;
-  const firstEmberLayer = Math.max(0, MESH_LAYERS - MESH_EMBER_LAYERS);
-  const { x: cx, y: cy } = center;
-  const cell = mesh.cell;
-  const strokeAlpha = alpha * (1 - emberMorph);
-  const emberAlpha = alpha * emberMorph;
-  const lineW = MESH_SNAKE_WIDTH_PX * zoom;
-  const fontPx = (MESH_SNAKE_WIDTH_PX / 5.4) * zoom + MESH_EMBER_FONT_EXTRA_PX;
-  const lineSpan = MESH_SNAKE_WIDTH_PX * 0.82;
-  const margin = lineW * 2 + MESH_CELL_PX * zoom;
-  const meshBgAlpha = alpha * Math.max(0, 1 - pageReveal);
-
-  const hexPath = new Path2D();
-  for (let i = 0; i < 6; i += 1) {
-    const a = hexVertexAngle(i);
-    const p = worldToScreen(
-      cx + HEX_SIZE_PX * Math.cos(a),
-      cy + HEX_SIZE_PX * Math.sin(a),
-      cx,
-      cy,
-      zoom,
-      width,
-      height,
-    );
-    if (i === 0) hexPath.moveTo(p.x, p.y);
-    else hexPath.lineTo(p.x, p.y);
-  }
-  hexPath.closePath();
-
-  ctx.save();
-
-  // Clip slightly inside so the border stroke stays crisp on top.
-  ctx.beginPath();
-  for (let i = 0; i < 6; i += 1) {
-    const a = hexVertexAngle(i);
-    const p = worldToScreen(
-      cx + HEX_SIZE_PX * 0.992 * Math.cos(a),
-      cy + HEX_SIZE_PX * 0.992 * Math.sin(a),
-      cx,
-      cy,
-      zoom,
-      width,
-      height,
-    );
-    if (i === 0) ctx.moveTo(p.x, p.y);
-    else ctx.lineTo(p.x, p.y);
-  }
-  ctx.closePath();
-  ctx.clip();
-
-  if (meshBgAlpha > 0.01) {
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = `rgba(${br},${bgc},${bb},${meshBgAlpha.toFixed(3)})`;
-    ctx.fill(hexPath);
-  }
-
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-  ctx.shadowBlur = 0;
-
-  // Scratch for visible screen-space segments (reused per layer).
-  const visEdges: MeshEdgeEmber[] = [];
-  const visX0: number[] = [];
-  const visY0: number[] = [];
-  const visX1: number[] = [];
-  const visY1: number[] = [];
-
-  for (let L = 0; L < MESH_LAYERS; L += 1) {
-    const depth = last <= 0 ? 1 : L / last;
-    const shade = 0.34 + 0.66 * depth;
-    const layerAng = MESH_LAYER_ANGLES[L] ?? 0;
-    const cosL = Math.cos(layerAng);
-    const sinL = Math.sin(layerAng);
-    const off = MESH_LAYER_OFFSETS[L] ?? { x: 0, y: 0 };
-    const ox = off.x * cell;
-    const oy = off.y * cell;
-    const strokeCol = `rgb(${Math.floor(ar * shade)},${Math.floor(ag * shade)},${Math.floor(ab * shade)})`;
-    const useEmbers = L >= firstEmberLayer;
-
-    visEdges.length = 0;
-    visX0.length = 0;
-    visY0.length = 0;
-    visX1.length = 0;
-    visY1.length = 0;
-
-    for (const edge of mesh.edges) {
-      // Inline layer transform (cached sin/cos).
-      const dx0 = edge.x0 - cx;
-      const dy0 = edge.y0 - cy;
-      const dx1 = edge.x1 - cx;
-      const dy1 = edge.y1 - cy;
-      const wx0 = cx + ox + dx0 * cosL - dy0 * sinL;
-      const wy0 = cy + oy + dx0 * sinL + dy0 * cosL;
-      const wx1 = cx + ox + dx1 * cosL - dy1 * sinL;
-      const wy1 = cy + oy + dx1 * sinL + dy1 * cosL;
-      const saX = (wx0 - cx) * zoom + width * 0.5;
-      const saY = (wy0 - cy) * zoom + height * 0.5;
-      const sbX = (wx1 - cx) * zoom + width * 0.5;
-      const sbY = (wy1 - cy) * zoom + height * 0.5;
-      if (
-        (saX < -margin && sbX < -margin) ||
-        (saX > width + margin && sbX > width + margin) ||
-        (saY < -margin && sbY < -margin) ||
-        (saY > height + margin && sbY > height + margin)
-      ) {
-        continue;
-      }
-      visEdges.push(edge);
-      visX0.push(saX);
-      visY0.push(saY);
-      visX1.push(sbX);
-      visY1.push(sbY);
-    }
-
-    // Ember layers drop the solid stroke once characters dominate.
-    const layerStroke =
-      useEmbers && emberAlpha > 0.72 ? 0 : strokeAlpha;
-    if (layerStroke > 0.01 && visEdges.length > 0) {
-      ctx.globalAlpha = layerStroke;
-      ctx.strokeStyle = strokeCol;
-      ctx.lineWidth = lineW * (0.86 + 0.16 * depth);
-      const path = new Path2D();
-      for (let i = 0; i < visEdges.length; i += 1) {
-        path.moveTo(visX0[i], visY0[i]);
-        path.lineTo(visX1[i], visY1[i]);
-      }
-      ctx.stroke(path);
-    }
-
-    if (useEmbers && emberAlpha > 0.01 && fontPx >= 4 && visEdges.length > 0) {
-      ctx.globalAlpha = emberAlpha * (0.55 + 0.45 * depth);
-      drawMeshEmbersScreen(
-        ctx,
-        visEdges,
-        visX0,
-        visY0,
-        visX1,
-        visY1,
-        atlas,
-        fontPx,
-        lineSpan * zoom,
-        width,
-        height,
-        // Flicker once on the front-most ember layer only.
-        L === last,
-      );
-    }
-  }
-
-  ctx.restore();
-
-  // 4px screen-space border between outer lasers and the interior mesh.
-  ctx.save();
-  ctx.globalAlpha = alpha;
-  ctx.lineJoin = "round";
-  ctx.lineCap = "round";
-  ctx.strokeStyle = `rgb(${ar},${ag},${ab})`;
-  ctx.lineWidth = CENTER_HEX_BORDER_PX;
-  ctx.stroke(hexPath);
-  ctx.restore();
-}
-
-function drawMeshEmbersScreen(
-  ctx: CanvasRenderingContext2D,
-  edges: MeshEdgeEmber[],
-  sx0: number[],
-  sy0: number[],
-  sx1: number[],
-  sy1: number[],
-  atlas: EmberAtlas,
-  fontPx: number,
-  spanPx: number,
-  width: number,
-  height: number,
-  flicker: boolean,
-): void {
-  const { canvas, cell: atlasCell, cols } = atlas;
-  const half = fontPx * 0.5;
-  const src = atlasCell;
-  // When the whole hex is still on-screen, thin the glyph density.
-  const slotStep = edges.length > 160 ? 2 : 1;
-
-  for (let e = 0; e < edges.length; e += 1) {
-    const edge = edges[e];
-    if (flicker) flickerEdgeChars(edge.chars);
-
-    const x0 = sx0[e];
-    const y0 = sy0[e];
-    const sdx = sx1[e] - x0;
-    const sdy = sy1[e] - y0;
-    const slen = Math.hypot(sdx, sdy) || 1;
-    const snx = -sdy / slen;
-    const sny = sdx / slen;
-    const ang = Math.atan2(sdy, sdx);
-    const ux = sdx / slen;
-    const uy = sdy / slen;
-    const { slots, chars } = edge;
-
-    for (let line = 0; line < MESH_EMBER_LINES; line += 1) {
-      const tLine =
-        MESH_EMBER_LINES <= 1 ? 0 : line / (MESH_EMBER_LINES - 1);
-      const off = (tLine - 0.5) * spanPx;
-      const base = line * slots;
-      const ox = snx * off;
-      const oy = sny * off;
-
-      ctx.save();
-      ctx.translate(x0 + ox, y0 + oy);
-      ctx.rotate(ang);
-      for (let s = 0; s < slots; s += slotStep) {
-        const u = slots === 1 ? 0.5 : (s + 0.5) / slots;
-        const gx = u * slen;
-        const wx = x0 + ox + ux * gx;
-        const wy = y0 + oy + uy * gx;
-        if (
-          wx < -fontPx ||
-          wx > width + fontPx ||
-          wy < -fontPx ||
-          wy > height + fontPx
-        ) {
-          continue;
-        }
-
-        const ch = chars[base + s] ?? 0;
-        ctx.drawImage(
-          canvas,
-          (ch % cols) * src,
-          ((ch / cols) | 0) * src,
-          src,
-          src,
-          gx - half,
-          -half,
-          fontPx,
-          fontPx,
-        );
-      }
-      ctx.restore();
-    }
-  }
+  overlay.appendChild(bar);
+  return bar;
 }

@@ -15,15 +15,20 @@ const bootPage = () => {
 
   const canvas = document.querySelector<HTMLCanvasElement>("#dust-canvas");
   const host = document.querySelector<HTMLElement>("#page-body");
-  if (canvas && host && canCreateWebGL()) {
-    try {
-      createDustScene(canvas, host);
-    } catch {
-      canvas.remove();
+
+  const startDust = () => {
+    if (canvas && host && canCreateWebGL()) {
+      try {
+        createDustScene(canvas, host);
+      } catch {
+        canvas.remove();
+      }
+    } else {
+      canvas?.remove();
     }
-  } else {
-    canvas?.remove();
-  }
+  };
+
+  requestAnimationFrame(startDust);
 };
 
 void setupLoadingScreen().then(bootPage);
