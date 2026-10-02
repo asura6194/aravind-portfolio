@@ -22,8 +22,14 @@ import type { LoaderParams } from "./loadingScreenConfig";
 
 const FILL_S = 0.4;
 const FLARE_DURATION = 0.5;
-/** Matches the centre hex's own emissive ramp so risen tiles look identical. */
+/** Centre hex's own emissive ramp — it alone should read as the bright flare. */
 const GLOW_RAMP = 2.6;
+/**
+ * Floor tiles rising with the wave use a much gentler ramp than the centre
+ * hex, so the wave front reads as a dim grey glow instead of a blown-out
+ * white patch trailing the centre flare.
+ */
+const RING_GLOW_RAMP = 0.9;
 
 const DARK = new Color(0x090b0f);
 const RED = new Color(WAVE_COLOR);
@@ -164,7 +170,7 @@ export function createWaveSystem(
 
     if (riseState.size === 0) return;
     if (glowStrength) {
-      glowStrength.value = GLOW_RAMP * Math.max(0.4, p.waveIntensity);
+      glowStrength.value = RING_GLOW_RAMP * Math.max(0.4, p.waveIntensity);
     }
     const lerpF = Math.min(1, dt * speed);
     const invHeight = 1 / Math.max(0.05, currentHexHeight);
@@ -382,10 +388,10 @@ function createFlareTexture(): CanvasTexture {
   const cy = size / 2;
 
   const core = ctx.createRadialGradient(cx, cy, 0, cx, cy, size * 0.5);
-  core.addColorStop(0, "rgba(255,235,225,1)");
-  core.addColorStop(0.15, "rgba(255,150,120,0.9)");
-  core.addColorStop(0.4, "rgba(255,38,38,0.45)");
-  core.addColorStop(1, "rgba(255,38,38,0)");
+  core.addColorStop(0, "rgba(255,255,255,1)");
+  core.addColorStop(0.15, "rgba(255,255,255,0.9)");
+  core.addColorStop(0.4, "rgba(255,255,255,0.45)");
+  core.addColorStop(1, "rgba(255,255,255,0)");
   ctx.fillStyle = core;
   ctx.fillRect(0, 0, size, size);
 
@@ -401,9 +407,9 @@ function createFlareTexture(): CanvasTexture {
       cx + Math.cos(angle) * len,
       cy + Math.sin(angle) * len,
     );
-    grad.addColorStop(0, "rgba(255,210,190,0.9)");
-    grad.addColorStop(0.5, "rgba(255,60,50,0.5)");
-    grad.addColorStop(1, "rgba(255,38,38,0)");
+    grad.addColorStop(0, "rgba(255,255,255,0.9)");
+    grad.addColorStop(0.5, "rgba(255,255,255,0.5)");
+    grad.addColorStop(1, "rgba(255,255,255,0)");
     ctx.strokeStyle = grad;
     ctx.lineWidth = w;
     ctx.beginPath();
@@ -421,9 +427,9 @@ function createFlareTexture(): CanvasTexture {
       cx + Math.cos(angle) * len,
       cy + Math.sin(angle) * len,
     );
-    grad.addColorStop(0, "rgba(255,60,50,0)");
-    grad.addColorStop(0.5, "rgba(255,225,210,0.95)");
-    grad.addColorStop(1, "rgba(255,60,50,0)");
+    grad.addColorStop(0, "rgba(255,255,255,0)");
+    grad.addColorStop(0.5, "rgba(255,255,255,0.95)");
+    grad.addColorStop(1, "rgba(255,255,255,0)");
     ctx.strokeStyle = grad;
     ctx.lineWidth = size * 0.015;
     ctx.beginPath();

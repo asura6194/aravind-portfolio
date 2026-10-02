@@ -1,6 +1,6 @@
 const SQRT3 = Math.sqrt(3);
 
-export const WAVE_COLOR = 0xff2626;
+export const WAVE_COLOR = 0xffffff;
 
 export type Axial = { q: number; r: number };
 export type XZ = { x: number; z: number };

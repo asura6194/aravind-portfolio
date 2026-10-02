@@ -1,8 +1,13 @@
 export const HEX_SIZE_PX = 5.2;
 export const HEX_GAP_PX = 1.6;
 export const SQRT3 = Math.sqrt(3);
-export const HEX_FILL = "#1e1c24";
-export const HEX_HIGHLIGHT = "#2a282f";
+export function hexFillColorVar(): string {
+  return readCssColor("--hex-fill", "#e2e2e2");
+}
+
+export function hexHighlightColorVar(): string {
+  return readCssColor("--hex-highlight", "#d2d2d2");
+}
 
 /** Horizontal center-to-center spacing (pointy-top). */
 export const HEX_COL_W = SQRT3 * HEX_SIZE_PX + HEX_GAP_PX;
@@ -28,7 +33,7 @@ export function hexTint(col: number, row: number): number {
 }
 
 export function hexFillColor(tint: number): string {
-  return tint > 0.86 ? HEX_HIGHLIGHT : HEX_FILL;
+  return tint > 0.86 ? hexHighlightColorVar() : hexFillColorVar();
 }
 
 export function hexVertexAngle(i: number): number {

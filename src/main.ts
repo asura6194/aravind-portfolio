@@ -5,9 +5,11 @@ import { setupLoadingScreen } from "./ui/loadingScreen";
 import { setupMotion } from "./ui/motion";
 import { setupNav } from "./ui/nav";
 import { renderPage } from "./ui/render";
+import { setupThemeToggle } from "./ui/theme";
 
 renderPage();
 setupNav();
+setupThemeToggle();
 
 const bootPage = () => {
   setupHexPanels();

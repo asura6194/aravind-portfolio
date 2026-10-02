@@ -8,16 +8,23 @@
       content="Aravind R — Full Stack Web Developer in Bengaluru. Web apps, APIs, and 3D experiences."
     />
     <title>Aravind R — Full Stack Web Developer</title>
+    <script>
+      (function () {
+        var stored = localStorage.getItem("theme");
+        var theme = stored === "light" || stored === "dark" ? stored : "dark";
+        document.documentElement.setAttribute("data-theme", theme);
+      })();
+    </script>
     <style>
       html,
       body {
         margin: 0;
-        background: #121018;
+        background: #ffffff;
       }
       html.is-loading,
       html.is-loading body {
         overflow: hidden;
-        background: #121018;
+        background: #ffffff;
       }
       html.is-loading body > :not(#loading-screen) {
         visibility: hidden !important;
@@ -29,7 +36,7 @@
         z-index: 2147483647;
         width: 100%;
         height: 100%;
-        background: #121018;
+        background: #ffffff;
         visibility: visible !important;
         pointer-events: all;
       }
@@ -62,6 +69,15 @@
         <span class="sr-only">Menu</span>
       </button>
       <nav id="site-nav" class="site-nav" aria-label="Primary">
+        <button
+          type="button"
+          class="theme-toggle"
+          aria-pressed="false"
+          aria-label="Switch to dark theme"
+        >
+          <span class="theme-toggle-dot" aria-hidden="true"></span>
+          Theme
+        </button>
         <a href="#about">About</a>
         <a href="#experience">Experience</a>
         <a href="#skills">Skills</a>

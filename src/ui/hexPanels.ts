@@ -1,12 +1,12 @@
 import {
   HEX_COL_W,
-  HEX_FILL,
-  HEX_HIGHLIGHT,
   HEX_ROW_H,
   HEX_SIZE_PX,
   HEX_SPACING,
   hexCenter,
+  hexFillColorVar,
   hexFits,
+  hexHighlightColorVar,
   hexTint,
 } from "../hex/hexGridConfig";
 
@@ -194,6 +194,8 @@ function drawHexes(state: PanelState, time: number): void {
   const { ctx, cells, width, height } = state;
   const band = WAVE_WIDTH_HEX * HEX_SPACING;
   const cyclePx = dropCyclePx(width, height);
+  const fill = hexFillColorVar();
+  const highlight = hexHighlightColorVar();
 
   syncDrops(state, time);
   for (const drop of state.drops) {
@@ -228,7 +230,7 @@ function drawHexes(state: PanelState, time: number): void {
       }
     }
 
-    ctx.fillStyle = cell.tint > 0.86 ? HEX_HIGHLIGHT : HEX_FILL;
+    ctx.fillStyle = cell.tint > 0.86 ? highlight : fill;
     drawHex(ctx, cell.x, cell.y, HEX_SIZE_PX, flip, ax, ay);
   }
 }

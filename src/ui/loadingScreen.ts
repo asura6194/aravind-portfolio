@@ -29,6 +29,7 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { WAVE_COLOR, isOriginHex } from "./hexLattice";
 import { createWaveSystem, type WaveSystem } from "./loaderWave";
 import {
@@ -41,10 +42,16 @@ import {
  * Loading screen — 3D hexagonal floor plus an inward hex-ring rise wave.
  */
 
-const HEX_COLOR = 0x0c0a0a;
-const FLOOR_COLOR = 0x060505;
-const CLEAR_COLOR = 0x050505;
-const TRENCH_EMISSIVE = 0x3a0808;
+const HEX_COLOR = 0x333333;
+const FLOOR_COLOR = 0x111111;
+const CLEAR_COLOR = 0x0a0a0a;
+const TRENCH_EMISSIVE = 0xffffff;
+/**
+ * Dimmer than WAVE_COLOR on purpose: tiles rising with the wave should read
+ * as lit grey, not full white, so only the centre hex itself reads as the
+ * bright white flare once the front reaches it.
+ */
+const RING_GLOW_COLOR = 0x7a7a7a;
 /** Tuning sliders are hidden once the loader's look is finalized; flip to debug again. */
 const SHOW_DEBUG_PANEL = false;
 /** Camera elevation drifts across this range while the wave sweeps inward. */
@@ -142,8 +149,10 @@ type FoundationScene = {
   camera: PerspectiveCamera;
   composer: EffectComposer;
   bloomPass: UnrealBloomPass;
+  postFXPass: ShaderPass;
   hexMesh: InstancedMesh;
   hexMat: MeshPhysicalMaterial;
+  hexUniforms: { time: { value: number }; idle: { value: number } };
   floor: Mesh;
   root: Group;
   lights: SceneLights;
@@ -153,7 +162,8 @@ type FoundationScene = {
 
 /**
  * Static isometric hex-floor foundation for the portfolio loader.
- * Press Space or click the canvas to continue. The debug sliders stay interactive.
+ * Runs to completion uninterrupted — no click-to-skip or pause, so the
+ * animation and the reveal it sets up always play in full.
  */
 export function setupLoadingScreen(): Promise<void> {
   return new Promise((resolve) => {
@@ -164,10 +174,7 @@ export function setupLoadingScreen(): Promise<void> {
     overlay.className = "loading-screen";
     overlay.setAttribute("role", "status");
     overlay.setAttribute("aria-live", "polite");
-    overlay.setAttribute(
-      "aria-label",
-      "Loading. Click the canvas to continue, or press Space to pause.",
-    );
+    overlay.setAttribute("aria-label", "Loading");
     if (!overlay.parentElement) {
       document.body.prepend(overlay);
     }
@@ -426,59 +433,9 @@ export function setupLoadingScreen(): Promise<void> {
       };
       window.addEventListener("resize", onResize);
 
-      let paused = false;
-      const pauseBadge = document.createElement("div");
-      pauseBadge.textContent = "Paused — Space to resume";
-      pauseBadge.hidden = true;
-      pauseBadge.style.cssText = `
-        position: absolute;
-        left: 12px;
-        top: 12px;
-        z-index: 2;
-        padding: 7px 12px;
-        border: 1px solid rgba(255, 100, 100, 0.35);
-        border-radius: 8px;
-        background: rgba(8, 10, 14, 0.6);
-        backdrop-filter: blur(10px);
-        color: #ffb4a0;
-        font: 11px/1.3 ui-sans-serif, system-ui, sans-serif;
-        letter-spacing: 0.04em;
-        pointer-events: none;
-      `;
-      overlay.appendChild(pauseBadge);
-
-      const togglePause = () => {
-        paused = !paused;
-        if (paused) {
-          foundation?.wave.pause();
-          elevTween?.pause();
-          dollyTween?.pause();
-          revealTween?.pause();
-        } else {
-          foundation?.wave.resume();
-          elevTween?.resume();
-          dollyTween?.resume();
-          revealTween?.resume();
-        }
-        pauseBadge.hidden = !paused;
-      };
-
-      const onKeydown = (event: KeyboardEvent) => {
-        if (event.code !== "Space" && event.key !== " ") return;
-        event.preventDefault();
-        togglePause();
-      };
-      const onContinue = () => {
-        finish();
-      };
-      window.addEventListener("keydown", onKeydown);
-      canvas.addEventListener("pointerdown", onContinue);
       removeListeners = () => {
         window.removeEventListener("resize", onResize);
-        window.removeEventListener("keydown", onKeydown);
-        canvas.removeEventListener("pointerdown", onContinue);
         panel?.remove();
-        pauseBadge.remove();
       };
 
       let lastFrame = performance.now();
@@ -487,7 +444,16 @@ export function setupLoadingScreen(): Promise<void> {
         const now = performance.now();
         const dt = Math.min(0.05, Math.max(0, (now - lastFrame) / 1000));
         lastFrame = now;
-        if (!paused) foundation.wave.update(dt);
+        foundation.wave.update(dt);
+        const nowS = now / 1000;
+        // Reuses the colour wash's own 0..1 ramp (set during the punch-in
+        // dolly) as the god-ray / chromatic-aberration drive — it's already
+        // the exact signal for "bursting out of the centre hex".
+        const burst = Number.parseFloat(colorWash.style.opacity) || 0;
+        foundation.hexUniforms.time.value = nowS;
+        foundation.postFXPass.uniforms.uTime.value = nowS;
+        foundation.postFXPass.uniforms.uGodRay.value = burst;
+        foundation.postFXPass.uniforms.uChroma.value = burst;
         foundation.composer.render();
         raf = requestAnimationFrame(tick);
       };
@@ -549,7 +515,7 @@ function createFoundationScene(
     clearcoat: 0.18,
     clearcoatRoughness: 0.45,
   });
-  applyGlowShader(hexMat);
+  const hexUniforms = applyGlowShader(hexMat);
 
   const bounds = initialBounds;
   fitFloorToBounds(floor, bounds);
@@ -568,7 +534,13 @@ function createFoundationScene(
   // Centre hex keeps its own geometry so the Hex "Edge" slider only resizes
   // the surrounding grid.
   const centerGeo = createHexBuildingGeometry(params.centerHexEdge);
-  const wave = createWaveSystem(centerGeo, () => params, onWavePlayStart, onFlareDone);
+  // Idle shimmer only makes sense before the wave has anything to show —
+  // fade it out the moment the real animation takes over.
+  const handleWavePlayStart = (durationSeconds: number) => {
+    onWavePlayStart(durationSeconds);
+    gsap.to(hexUniforms.idle, { value: 0, duration: 0.6, ease: "power2.out" });
+  };
+  const wave = createWaveSystem(centerGeo, () => params, handleWavePlayStart, onFlareDone);
   root.add(wave.group);
   wave.rebuild(tiles, params.hexEdge, params.hexHeight, hexMesh);
 
@@ -611,6 +583,9 @@ function createFoundationScene(
     params.bloomThreshold,
   );
   composer.addPass(bloomPass);
+  const postFXPass = new ShaderPass(createPostFXShader());
+  postFXPass.uniforms.uResolution.value.set(width, height);
+  composer.addPass(postFXPass);
   composer.addPass(new OutputPass());
 
   const dispose = () => {
@@ -631,8 +606,10 @@ function createFoundationScene(
     camera,
     composer,
     bloomPass,
+    postFXPass,
     hexMesh,
     hexMat,
+    hexUniforms,
     floor,
     root,
     lights,
@@ -672,6 +649,7 @@ function applyCameraAndGrid(sc: FoundationScene, rebuildGeometry: boolean): void
   sc.renderer.setSize(width, height, false);
   sc.composer.setPixelRatio(dpr);
   sc.composer.setSize(width, height);
+  sc.postFXPass.uniforms.uResolution.value.set(width, height);
 
   const bounds = getWorstCaseGroundBounds(sc.camera, width, height);
   fitFloorToBounds(sc.floor, bounds);
@@ -736,30 +714,128 @@ type GroundBounds = {
  * floor tile light up independently while sharing one draw call. Instance
  * colour would only tint the diffuse term, which reads as flat grey against
  * the dark palette and never reaches the bloom threshold.
+ *
+ * Also carries two extras on the same shader, since they're a few lines on
+ * top of a patch that's already here: a view-angle fresnel rim (reuses
+ * uGlowColor, no new tint to tune) and a per-instance idle shimmer driven by
+ * uTime/uIdleStrength, which callers fade to 0 once the wave actually starts.
  */
-function applyGlowShader(mat: MeshPhysicalMaterial): void {
+function applyGlowShader(
+  mat: MeshPhysicalMaterial,
+): { time: { value: number }; idle: { value: number } } {
   // Mirrors the centre hex's own lit look: diffuse lerps toward the wave red
   // while emissive ramps up, both driven by the tile's 0..1 rise progress.
   const strength = { value: 0 };
+  const time = { value: 0 };
+  const idle = { value: 1 };
   mat.userData.glowStrength = strength;
   mat.onBeforeCompile = (shader) => {
-    shader.uniforms.uGlowColor = { value: new Color(WAVE_COLOR) };
+    shader.uniforms.uGlowColor = { value: new Color(RING_GLOW_COLOR) };
     shader.uniforms.uGlowStrength = strength;
-    shader.vertexShader = `attribute float aGlow;\nvarying float vGlow;\n${shader.vertexShader}`.replace(
-      "#include <begin_vertex>",
-      "#include <begin_vertex>\n\tvGlow = aGlow;",
-    );
+    shader.uniforms.uTime = time;
+    shader.uniforms.uIdleStrength = idle;
+    shader.vertexShader =
+      `attribute float aGlow;\nuniform float uTime;\nuniform float uIdleStrength;\nvarying float vGlow;\n${shader.vertexShader}`.replace(
+        "#include <begin_vertex>",
+        `#include <begin_vertex>
+	vGlow = aGlow;
+	float idleSeed = dot( instanceMatrix[3].xz, vec2( 12.9898, 78.233 ) );
+	float idleNoise = sin( idleSeed + uTime * 1.6 ) * 0.5 + 0.5;
+	transformed.y += idleNoise * uIdleStrength * 0.12;`,
+      );
     shader.fragmentShader = `uniform vec3 uGlowColor;\nuniform float uGlowStrength;\nvarying float vGlow;\n${shader.fragmentShader}`
       .replace(
         "#include <color_fragment>",
         "#include <color_fragment>\n\tdiffuseColor.rgb = mix( diffuseColor.rgb, uGlowColor, clamp( vGlow, 0.0, 1.0 ) );",
       )
       .replace(
+        "#include <normal_fragment_maps>",
+        "#include <normal_fragment_maps>\n\tfloat vFresnel = pow( 1.0 - clamp( dot( normalize( normal ), normalize( vViewPosition ) ), 0.0, 1.0 ), 2.2 );",
+      )
+      .replace(
         "#include <emissivemap_fragment>",
-        "#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += uGlowColor * ( vGlow * uGlowStrength );",
+        "#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += uGlowColor * ( vGlow * uGlowStrength );\n\ttotalEmissiveRadiance += uGlowColor * vFresnel * 0.8;",
       );
   };
   mat.customProgramCacheKey = () => "loader-hex-glow";
+  return { time, idle };
+}
+
+/**
+ * Single combined post pass: chromatic aberration + radial god-rays (both
+ * driven by `uChroma`/`uGodRay`, ramped from the punch-in's own colour-wash
+ * progress — see tick()), plus an always-on vignette and film grain. One
+ * ShaderPass instead of four, since they're all one texture-in/texture-out
+ * pixel shader anyway.
+ */
+function createPostFXShader(): {
+  uniforms: Record<string, { value: unknown }>;
+  vertexShader: string;
+  fragmentShader: string;
+} {
+  return {
+    uniforms: {
+      tDiffuse: { value: null },
+      uTime: { value: 0 },
+      uGodRay: { value: 0 },
+      uChroma: { value: 0 },
+      uResolution: { value: new Vector2(1, 1) },
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform sampler2D tDiffuse;
+      uniform float uTime;
+      uniform float uGodRay;
+      uniform float uChroma;
+      uniform vec2 uResolution;
+      varying vec2 vUv;
+
+      float grainHash(vec2 p) {
+        return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+      }
+
+      void main() {
+        vec2 uv = vUv;
+        vec2 toCenter = uv - 0.5;
+        float dist = length(toCenter);
+        vec2 dir = toCenter / max(dist, 1e-4);
+
+        float caAmount = uChroma * 0.018;
+        vec3 color = vec3(
+          texture2D(tDiffuse, uv - dir * caAmount).r,
+          texture2D(tDiffuse, uv).g,
+          texture2D(tDiffuse, uv + dir * caAmount).b
+        );
+
+        if (uGodRay > 0.001) {
+          vec3 rays = vec3(0.0);
+          vec2 step = -toCenter * 0.12;
+          vec2 samplePos = uv;
+          float weight = 1.0;
+          for (int i = 0; i < 8; i += 1) {
+            samplePos += step;
+            rays += texture2D(tDiffuse, samplePos).rgb * weight;
+            weight *= 0.82;
+          }
+          color += (rays / 8.0) * uGodRay * 1.4;
+        }
+
+        float vignette = smoothstep(0.9, 0.25, dist);
+        color *= mix(0.55, 1.0, vignette);
+
+        float grain = (grainHash(uv * uResolution + uTime) - 0.5) * 0.05;
+        color += grain;
+
+        gl_FragColor = vec4(color, 1.0);
+      }
+    `,
+  };
 }
 
 /** Sized to match the instance count; read and written by the wave system. */

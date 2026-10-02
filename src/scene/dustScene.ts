@@ -24,6 +24,7 @@ import {
   EMBER_FONT_STACK,
   randomEmberCharIndex,
 } from "../embers/emberCharacters";
+import { readCssColor } from "../hex/hexGridConfig";
 
 const FRUSTUM = 5;
 const GRID_SPACING_PX = 12;
@@ -32,8 +33,16 @@ const MOUSE_RADIUS_PX = 40;
 const WAVE_SPEED = 0.75;
 const MAX_PARTICLES = 2000000;
 const DUST_EDGE_FADE = 0.24;
-const ACCENT_RED = 0xff3d5a;
-const ACCENT_RED_DIM = 0xc42e48;
+
+/** Theme-driven particle colors — kept live via syncAccentColors(). */
+const accentColor = new Color();
+const accentColorDim = new Color();
+
+function syncAccentColors(): void {
+  accentColor.set(readCssColor("--dust-color", "#1a1a1a"));
+  accentColorDim.set(readCssColor("--dust-color-dim", "#4d4d4d"));
+}
+syncAccentColors();
 
 // =============================================================================
 // PERSPECTIVE GRID — square floor, 1-point perspective
@@ -197,7 +206,6 @@ export function createDustScene(
   let time = 0;
   let lastAspect = hostAspect(host);
   const dustColor = new Color();
-  const dustColorDim = new Color(ACCENT_RED_DIM);
 
   const tick = () => {
     if (!playing) return;
@@ -240,7 +248,7 @@ export function createDustScene(
 
       const fade = edgeFade(v);
       const tint = 0.65 + ((p.col * 7 + p.row * 3) % 10) / 28;
-      dustColor.setHex(ACCENT_RED).lerp(dustColorDim, 1 - tint);
+      dustColor.copy(accentColor).lerp(accentColorDim, 1 - tint);
       dustColor.multiplyScalar(fade);
       grid.mesh.setColorAt(i, dustColor);
 
@@ -303,6 +311,12 @@ export function createDustScene(
     }
   };
 
+  const onThemeChange = () => {
+    syncAccentColors();
+    rebuildGridLines();
+  };
+  window.addEventListener("themechange", onThemeChange);
+
   const ro = new ResizeObserver(resize);
   ro.observe(host);
   resize();
@@ -328,6 +342,7 @@ export function createDustScene(
     cancelAnimationFrame(raf);
     ro.disconnect();
     io.disconnect();
+    window.removeEventListener("themechange", onThemeChange);
     host.removeEventListener("pointermove", onPointerMove);
     host.removeEventListener("pointerleave", onPointerLeave);
     renderer.dispose();
@@ -354,7 +369,7 @@ function buildPerspectiveGrid(aspect: number, isTop: boolean): LineSegments {
 
   const positions: number[] = [];
   const colors: number[] = [];
-  const base = new Color(ACCENT_RED);
+  const base = accentColor.clone();
 
   const fadeAt = (z: number): number => {
     const t = Math.min(1, Math.max(0, (z - zNear) / GRID_FADE_DISTANCE));
@@ -511,7 +526,7 @@ function createGrid(host: HTMLElement): GridState {
       dummy.updateMatrix();
       mesh.setMatrixAt(particles.length - 1, dummy.matrix);
       const tint = 0.65 + ((col * 7 + row * 3) % 10) / 28;
-      color.setHex(ACCENT_RED).lerp(new Color(ACCENT_RED_DIM), 1 - tint);
+      color.copy(accentColor).lerp(accentColorDim, 1 - tint);
       color.multiplyScalar(fade);
       mesh.setColorAt(particles.length - 1, color);
     }
@@ -731,7 +746,7 @@ function tickEmbers(
       dummy.scale.setScalar(visible ? scale : 0);
       dummy.updateMatrix();
       embers.mesh.setMatrixAt(index, dummy.matrix);
-      color.setHex(ACCENT_RED);
+      color.copy(accentColor);
       if (t === 0) color.lerp(new Color(0xffffff), 0.28 * near);
       color.multiplyScalar(fade);
       embers.mesh.setColorAt(index, color);
