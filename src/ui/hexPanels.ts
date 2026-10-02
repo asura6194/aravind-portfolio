@@ -12,6 +12,9 @@ import {
 
 const PANEL_SELECTOR = ".hex-panel";
 
+/** Peak tilt angle in degrees at the card's edge. */
+const TILT_MAX_DEG = 6;
+
 /** Wave band width in hex cells. Try 3–5. */
 const WAVE_WIDTH_HEX = 12;
 
@@ -114,6 +117,26 @@ function mountPanel(panel: HTMLElement): void {
     { threshold: 0.02 },
   );
   io.observe(panel);
+
+  setupTilt(panel);
+}
+
+/** Pointer-driven card tilt — skipped without a fine pointer or with reduced motion. */
+function setupTilt(panel: HTMLElement): void {
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  if (!window.matchMedia("(hover: hover) and (pointer: fine)").matches) return;
+
+  panel.addEventListener("pointermove", (event) => {
+    const rect = panel.getBoundingClientRect();
+    const px = (event.clientX - rect.left) / rect.width - 0.5;
+    const py = (event.clientY - rect.top) / rect.height - 0.5;
+    panel.style.setProperty("--tilt-x", `${(-py * TILT_MAX_DEG).toFixed(2)}deg`);
+    panel.style.setProperty("--tilt-y", `${(px * TILT_MAX_DEG).toFixed(2)}deg`);
+  });
+  panel.addEventListener("pointerleave", () => {
+    panel.style.setProperty("--tilt-x", "0deg");
+    panel.style.setProperty("--tilt-y", "0deg");
+  });
 }
 
 function resizePanel(panel: HTMLElement, state: PanelState): void {

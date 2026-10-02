@@ -10,6 +10,8 @@ export function setupMotion(): void {
       el.style.opacity = "1";
       el.style.transform = "none";
     });
+    const timelineFill = document.querySelector<HTMLElement>(".timeline-fill");
+    if (timelineFill) timelineFill.style.transform = "scaleY(1)";
     return;
   }
 
@@ -27,4 +29,18 @@ export function setupMotion(): void {
       },
     });
   });
+
+  const timelineFill = document.querySelector(".timeline-fill");
+  if (timelineFill) {
+    gsap.to(timelineFill, {
+      scaleY: 1,
+      ease: "none",
+      scrollTrigger: {
+        trigger: ".timeline",
+        start: "top 75%",
+        end: "bottom 60%",
+        scrub: true,
+      },
+    });
+  }
 }

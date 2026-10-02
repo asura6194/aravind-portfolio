@@ -1,5 +1,6 @@
 import "./styles/main.css";
 import { canCreateWebGL, createDustScene } from "./scene/dustScene";
+import { setupCustomCursor } from "./ui/cursor";
 import { setupHexPanels } from "./ui/hexPanels";
 import { setupLoadingScreen } from "./ui/loadingScreen";
 import { setupMotion } from "./ui/motion";
@@ -10,18 +11,18 @@ import { setupThemeToggle } from "./ui/theme";
 renderPage();
 setupNav();
 setupThemeToggle();
+setupCustomCursor();
 
 const bootPage = () => {
   setupHexPanels();
   setupMotion();
 
   const canvas = document.querySelector<HTMLCanvasElement>("#dust-canvas");
-  const host = document.querySelector<HTMLElement>("#page-body");
 
   const startDust = () => {
-    if (canvas && host && canCreateWebGL()) {
+    if (canvas && canCreateWebGL()) {
       try {
-        createDustScene(canvas, host);
+        createDustScene(canvas, canvas);
       } catch {
         canvas.remove();
       }

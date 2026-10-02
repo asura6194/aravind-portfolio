@@ -1,5 +1,5 @@
-export const HEX_SIZE_PX = 5.2;
-export const HEX_GAP_PX = 1.6;
+export const HEX_SIZE_PX = 9;
+export const HEX_GAP_PX = 2.2;
 export const SQRT3 = Math.sqrt(3);
 export function hexFillColorVar(): string {
   return readCssColor("--hex-fill", "#e2e2e2");

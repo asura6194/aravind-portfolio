@@ -1,3 +1,72 @@
+/* Theme toggle's circle reveal supplies its own transition — drop the
+   browser's default cross-fade so only the clip-path animation shows. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  *,
+  *::before,
+  *::after {
+    cursor: none !important;
+  }
+}
+
+.custom-cursor {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 18px;
+  height: 18px;
+  margin: -9px 0 0 -9px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #ff8a5c 0%, #f64709 65%, transparent 100%);
+  box-shadow:
+    0 0 12px 4px rgb(246 71 9 / 0.65),
+    0 0 28px 10px rgb(246 71 9 / 0.3);
+  pointer-events: none;
+  z-index: 2147483647;
+  opacity: 0;
+  transition:
+    opacity 0.2s ease,
+    width 0.2s ease,
+    height 0.2s ease,
+    margin 0.2s ease,
+    background 0.2s ease,
+    box-shadow 0.2s ease;
+  will-change: transform;
+}
+
+.custom-cursor.is-visible {
+  opacity: 1;
+}
+
+.custom-cursor.is-hover {
+  width: 34px;
+  height: 34px;
+  margin: -17px 0 0 -17px;
+  background: radial-gradient(circle, #ff8a5c 0%, #f64709 65%, transparent 100%);
+  box-shadow:
+    0 0 16px 6px rgb(246 71 9 / 0.7),
+    0 0 36px 14px rgb(246 71 9 / 0.4);
+}
+
+/* Subtle full-viewport film grain — texture over flat colour fields at
+   near-zero cost, pure CSS. */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  pointer-events: none;
+  opacity: 0.035;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  background-size: 180px 180px;
+}
+
 :root {
   --bg: #ffffff;
   --bg-elevated: #f2f2f2cc;
@@ -16,7 +85,7 @@
   --header-h: 4rem;
   --space: clamp(1.25rem, 4vw, 2.5rem);
   --max: 72rem;
-  --font-display: "Syne", system-ui, sans-serif;
+  --font-display: "Unbounded", system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
   color-scheme: light;
 }
@@ -113,13 +182,13 @@ h2,
 h3 {
   font-family: var(--font-display);
   line-height: 1.1;
-  letter-spacing: -0.03em;
+  letter-spacing: -0.01em;
   margin: 0 0 0.6em;
 }
 
 h1 {
-  font-size: clamp(2.6rem, 8vw, 5.5rem);
-  font-weight: 800;
+  font-size: clamp(2.3rem, 7vw, 4.8rem);
+  font-weight: 700;
 }
 
 h2 {
@@ -222,12 +291,14 @@ h3 {
 .theme-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
+  justify-content: space-between;
+  gap: 0.4rem;
+  width: 5.5rem;
   border: 1px solid var(--line);
   border-radius: 999px;
   background: var(--bg-elevated);
   color: var(--text);
-  padding: 0.3rem 0.7rem 0.3rem 0.3rem;
+  padding: 0.3rem 0.5rem;
   font-family: var(--font-mono);
   font-size: 0.72rem;
   letter-spacing: 0.04em;
@@ -237,6 +308,11 @@ h3 {
     background-color 0.35s ease,
     border-color 0.35s ease,
     color 0.35s ease;
+}
+
+/* Light = knob left, label right. Dark = knob right, label left. */
+:root[data-theme="dark"] .theme-toggle {
+  flex-direction: row-reverse;
 }
 
 .theme-toggle:hover,
@@ -251,6 +327,11 @@ h3 {
   background: var(--accent);
   flex-shrink: 0;
   transition: background-color 0.35s ease;
+}
+
+.theme-toggle-label {
+  flex: 1;
+  text-align: center;
 }
 
 .site-nav {
@@ -396,7 +477,7 @@ h3 {
 #dust-canvas {
   width: 100%;
   height: 100%;
-  position: absolute;
+  position: fixed;
   inset: 0;
   z-index: 0;
   pointer-events: none;
@@ -405,7 +486,6 @@ h3 {
 .page-body {
   position: relative;
   isolation: isolate;
-  background: var(--bg);
   background-image: radial-gradient(
     ellipse 120% 80% at 50% 50%,
     color-mix(in srgb, var(--text) 4%, transparent) 0%,
@@ -428,7 +508,6 @@ h3 {
 .about-card,
 .edu-card,
 .featured-card,
-.timeline li,
 .skill-group,
 .hex-panel {
   position: relative;
@@ -438,6 +517,15 @@ h3 {
   border-radius: var(--radius);
   padding: 1.25rem 1.4rem;
   transition: background-color 0.35s ease;
+}
+
+.hex-panel {
+  --tilt-x: 0deg;
+  --tilt-y: 0deg;
+  transform: perspective(900px) rotateX(var(--tilt-x)) rotateY(var(--tilt-y));
+  transition:
+    background-color 0.35s ease,
+    transform 0.25s ease;
 }
 
 .hex-panel-canvas {
@@ -481,14 +569,23 @@ h3 {
   margin-bottom: 0.35rem;
 }
 
-.job-logo {
-  width: min(10.5rem, 42%);
-  height: auto;
-  max-height: 3.4rem;
-  object-fit: contain;
-  object-position: right center;
+.job-logo-hex {
   flex-shrink: 0;
-  border-radius: 8px;
+  width: 3.6rem;
+  height: 4.1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.3rem;
+  background: var(--panel-bg);
+  clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+  transition: background-color 0.35s ease;
+}
+
+.job-logo {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .inline-logo {
@@ -506,11 +603,45 @@ h3 {
 }
 
 .timeline {
+  position: relative;
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 0 0 0 2.4rem;
   display: grid;
   gap: 1rem;
+}
+
+.timeline-track {
+  position: absolute;
+  top: 0.6rem;
+  bottom: 0.6rem;
+  left: 0.5rem;
+  width: 2px;
+  background: var(--line);
+}
+
+.timeline-fill {
+  position: absolute;
+  inset: 0;
+  background: var(--accent);
+  transform: scaleY(0);
+  transform-origin: top;
+}
+
+.timeline-item {
+  position: relative;
+}
+
+.timeline-node {
+  position: absolute;
+  left: -2.3rem;
+  top: 1.6rem;
+  width: 0.9rem;
+  height: 0.9rem;
+  background: var(--accent);
+  clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+  box-shadow: 0 0 0 4px var(--bg);
+  transition: box-shadow 0.35s ease;
 }
 
 .job-meta {
@@ -570,18 +701,35 @@ h3 {
 .chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.45rem;
+  gap: 0.5rem;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
 .chips li {
-  border: 1px solid var(--text);
-  border-radius: 999px;
-  padding: 0.25rem 0.7rem;
-  font-size: 0.78rem;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 6.1rem;
+  height: 5.3rem;
+  padding: 0 0.6rem;
+  border-radius: var(--radius);
+  background: transparent;
   color: var(--text);
+  font-size: 0.86rem;
+  font-weight: 500;
+  line-height: 1.2;
+  text-align: center;
+  text-shadow: 0 1px 6px color-mix(in srgb, var(--bg) 70%, transparent);
+  transition: transform 0.3s ease;
+}
+
+.chips li:hover,
+.chips li:focus-visible {
+  transform: translateY(-3px) scale(1.05);
+  box-shadow: 0 0 22px 2px color-mix(in srgb, var(--accent) 50%, transparent);
 }
 
 .featured-card h3 {
@@ -665,9 +813,23 @@ h3 {
     align-items: flex-start;
   }
 
-  .job-logo {
-    object-position: left center;
-    max-height: 2.8rem;
+  .job-logo-hex {
+    width: 3rem;
+    height: 3.45rem;
+  }
+
+  .timeline {
+    padding-left: 1.6rem;
+  }
+
+  .timeline-track {
+    left: 0.3rem;
+  }
+
+  .timeline-node {
+    left: -1.5rem;
+    width: 0.7rem;
+    height: 0.7rem;
   }
 
   .hero {

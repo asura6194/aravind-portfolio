@@ -85,21 +85,12 @@ const PUNCH_FILL_MARGIN = 0.7;
 const PUNCH_DURATION = 0.5;
 /**
  * Reveal transition once the dolly zoom's colour wash covers the screen: the
- * real page (already sitting hidden underneath the loader the whole time)
- * is scaled way up around the nav logo's "R", then eased back down to its
- * natural size — a zoom-out emerging from that single point — while the
- * wash fades away over the same stretch.
+ * real page (already sitting at natural size underneath the loader the whole
+ * time) is punched through by a hexagon growing from screen centre — same
+ * clip-path-hole technique as the theme toggle's wipe — until the hole
+ * outgrows the viewport and the wash underneath it is gone.
  */
-const REVEAL_START_SCALE = 34;
-const REVEAL_DURATION = 2.3;
-/**
- * The wash stays opaque until the page has zoomed back down to nearly this
- * scale before fading. At high magnification even a couple of pixels of
- * anchor imprecision (font antialiasing, glyph metrics) reads as an obvious
- * colour mismatch once blown up 30-plus times; holding the flat wash colour
- * until we're much closer to natural size keeps that imprecision invisible.
- */
-const REVEAL_WASH_CLEAR_SCALE = 1.6;
+const REVEAL_DURATION = 1.4;
 /**
  * Bloom strength is derived from the wave intensity rather than being its own
  * slider — both fed the same perceived brightness, so one knob now drives the
@@ -114,6 +105,39 @@ function bloomStrengthFor(intensity: number): number {
 const VIEW_PAD_HEXES = 2;
 const SQRT3 = Math.sqrt(3);
 const LOOK_AT = new Vector3(0, 0, 0);
+
+/**
+ * SVG path for "full viewport rect, minus a hexagon hole of radius r at
+ * (cx, cy)" — same hexagon shape as the theme toggle's wipe. Used with
+ * `clip-path: path(evenodd, ...)`: evenodd cancels out the overlapping
+ * hexagon, punching a see-through hole through whatever the path is applied
+ * to.
+ */
+function hexHolePath(cx: number, cy: number, r: number, w: number, h: number): string {
+  const pts = Array.from({ length: 6 }, (_, i) => {
+    const a = (Math.PI / 180) * (60 * i - 90);
+    return `${cx + r * Math.cos(a)} ${cy + r * Math.sin(a)}`;
+  });
+  return `M0 0 H${w} V${h} H0 Z M${pts.join(" L")} Z`;
+}
+
+/**
+ * Hero image + webfonts are the only things the just-revealed page needs to
+ * already look right — wait for them alongside the reveal animation so a
+ * slow network can't finish the loader onto a half-rendered page.
+ */
+function waitForCriticalAssets(): Promise<void> {
+  const heroImg = document.querySelector<HTMLImageElement>(".hero-bg");
+  const imgReady =
+    heroImg && !heroImg.complete
+      ? new Promise<void>((res) => {
+          heroImg.addEventListener("load", () => res(), { once: true });
+          heroImg.addEventListener("error", () => res(), { once: true });
+        })
+      : Promise.resolve();
+  const fontsReady = document.fonts?.ready ?? Promise.resolve();
+  return Promise.all([imgReady, fontsReady]).then(() => undefined);
+}
 
 function cloneParams(source: LoaderParams): LoaderParams {
   return {
@@ -166,6 +190,7 @@ type FoundationScene = {
  * animation and the reveal it sets up always play in full.
  */
 export function setupLoadingScreen(): Promise<void> {
+  const assetsReady = waitForCriticalAssets();
   return new Promise((resolve) => {
     const overlay =
       document.querySelector<HTMLElement>("#loading-screen") ??
@@ -218,8 +243,6 @@ export function setupLoadingScreen(): Promise<void> {
       elevTween?.kill();
       dollyTween?.kill();
       revealTween?.kill();
-      document.body.style.transform = "";
-      document.body.style.transformOrigin = "";
       document.documentElement.style.overflow = "";
       document.body.style.pointerEvents = "";
       removeListeners?.();
@@ -254,41 +277,34 @@ export function setupLoadingScreen(): Promise<void> {
       cancelAnimationFrame(raf);
       revealTween?.kill();
 
-      // Re-parent the loader above <body> so the page's zoom-out transform
-      // (applied to <body> below) doesn't drag this still-opaque cover along
-      // with it — it has to stay pinned full-viewport until its own fade.
+      // Re-parent the loader above <body> so it keeps covering the page
+      // until the expanding hexagon hole has eaten through it.
       document.documentElement.appendChild(overlay);
       document.documentElement.classList.remove("is-loading");
       document.body.classList.remove("is-loading");
       // The is-loading class also gated scroll/pointer-events; removing it
-      // reveals the real DOM, so re-lock both by hand until the zoom-out
-      // settles — otherwise the page can be scrolled or clicked mid-flight.
+      // reveals the real DOM at natural size, so re-lock both by hand until
+      // the hole finishes growing — otherwise the page can be scrolled or
+      // clicked mid-reveal.
       document.documentElement.style.overflow = "hidden";
       document.body.style.pointerEvents = "none";
 
-      const anchor =
-        document.querySelector<HTMLElement>(".logo-r") ??
-        document.querySelector<HTMLElement>(".logo");
-      const rect = anchor?.getBoundingClientRect();
-      const originX = rect ? rect.left + rect.width / 2 : 24;
-      const originY = rect ? rect.top + rect.height / 2 : 24;
-      document.body.style.transformOrigin = `${originX}px ${originY}px`;
-      document.body.style.transform = `scale(${REVEAL_START_SCALE})`;
+      const w = Math.max(1, window.innerWidth);
+      const h = Math.max(1, window.innerHeight);
+      const cx = w / 2;
+      const cy = h / 2;
+      const diagonal = Math.hypot(w, h);
 
-      const proxy = { scale: REVEAL_START_SCALE };
+      const proxy = { r: 0 };
       revealTween = gsap.to(proxy, {
-        scale: 1,
+        r: diagonal,
         duration: REVEAL_DURATION,
-        ease: "power2.out",
+        ease: "power2.inOut",
         onUpdate: () => {
-          document.body.style.transform = `scale(${proxy.scale})`;
-          const washT =
-            (proxy.scale - REVEAL_WASH_CLEAR_SCALE) /
-            (REVEAL_START_SCALE - REVEAL_WASH_CLEAR_SCALE);
-          overlay.style.opacity = String(Math.max(0, Math.min(1, washT)));
+          overlay.style.clipPath = `path(evenodd, "${hexHolePath(cx, cy, proxy.r, w, h)}")`;
         },
         onComplete: () => {
-          finish();
+          void assetsReady.then(finish);
         },
       });
     };

@@ -24,16 +24,22 @@ export function renderPage(): void {
 
   const timeline = document.querySelector("[data-experience]");
   if (timeline) {
-    timeline.innerHTML = experience
-      .map(
+    timeline.innerHTML = `
+      <div class="timeline-track" aria-hidden="true">
+        <div class="timeline-fill"></div>
+      </div>
+      ${experience
+        .map(
         (job) => `
-        <li class="hex-panel">
+        <li class="timeline-item">
+          <span class="timeline-node" aria-hidden="true"></span>
+          <div class="hex-panel">
           <div class="job-head">
             <div>
               <h3>${escapeHtml(job.company)}</h3>
               <p class="job-meta">${escapeHtml(job.location)}</p>
             </div>
-            <img class="job-logo" src="${escapeHtml(assetUrl(job.logo))}" alt="${escapeHtml(job.logoAlt)}" />
+            <span class="job-logo-hex"><img class="job-logo" src="${escapeHtml(assetUrl(job.logo))}" alt="${escapeHtml(job.logoAlt)}" /></span>
           </div>
           ${job.roles
             .map(
@@ -47,9 +53,11 @@ export function renderPage(): void {
             </section>`,
             )
             .join("")}
+          </div>
         </li>`,
-      )
-      .join("");
+        )
+        .join("")}
+    `;
   }
 
   const skillsRoot = document.querySelector("[data-skills]");
@@ -57,10 +65,10 @@ export function renderPage(): void {
     skillsRoot.innerHTML = Object.entries(skills)
       .map(
         ([group, items]) => `
-        <article class="skill-group hex-panel">
+        <article class="skill-group">
           <h3>${escapeHtml(group)}</h3>
           <ul class="chips">
-            ${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+            ${items.map((item) => `<li class="hex-panel">${escapeHtml(item)}</li>`).join("")}
           </ul>
         </article>`,
       )

@@ -33,6 +33,8 @@ const MOUSE_RADIUS_PX = 40;
 const WAVE_SPEED = 0.75;
 const MAX_PARTICLES = 2000000;
 const DUST_EDGE_FADE = 0.24;
+/** World units of background drift per pixel scrolled — slow, so it reads as depth, not a second scrollbar. */
+const PARALLAX_FACTOR = 0.0006;
 
 /** Theme-driven particle colors — kept live via syncAccentColors(). */
 const accentColor = new Color();
@@ -71,7 +73,7 @@ const GRID_FADE_DISTANCE = 1.9;
 const EMBER_SPEED_PX = 0.65;
 
 /** Glyph size in pixels at the nearest depth. */
-const EMBER_SIZE_PX = 16;
+const EMBER_SIZE_PX = 26;
 
 /**
  * Farthest Z. Smaller / dimmer, deeper into the scene.
@@ -85,7 +87,7 @@ const EMBER_MIN_DEPTH = 5;
 const EMBER_MAX_DEPTH = 10;
 
 /** How many ember streams are alive at once. Derived from viewport width. */
-const EMBER_COUNT_WIDTH_DIVISOR = 2;
+const EMBER_COUNT_WIDTH_DIVISOR = 16;
 
 const EMBER_TAIL = 15;
 const EMBER_TAIL_GAP_PX = 18;
@@ -187,8 +189,10 @@ export function createDustScene(
     const rect = host.getBoundingClientRect();
     const ndcX = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     const ndcY = ((event.clientY - rect.top) / rect.height) * 2 - 1;
+    // Camera drifts on Y for the scroll-parallax effect — fold that in, or
+    // the ripple centres on where the cursor WOULD be at scrollY 0.
     mouse.x = ndcX * FRUSTUM * hostAspect(host);
-    mouse.y = -ndcY * FRUSTUM;
+    mouse.y = -ndcY * FRUSTUM + camera.position.y;
     mouse.inside = true;
   };
 
@@ -198,14 +202,24 @@ export function createDustScene(
     mouse.y = 9999;
   };
 
-  host.addEventListener("pointermove", onPointerMove);
-  host.addEventListener("pointerleave", onPointerLeave);
+  // `host` is the fixed, viewport-sized canvas itself (pointer-events: none,
+  // so it never receives these) — listen on window instead, using the same
+  // rect math since the canvas rect always equals the viewport now.
+  window.addEventListener("pointermove", onPointerMove);
+  window.addEventListener("pointerleave", onPointerLeave);
+
+  // Background drifts slower than the page scrolls — the "camera" keeps
+  // going instead of resetting at every section boundary.
+  let scrollY = window.scrollY;
+  const onScroll = () => {
+    scrollY = window.scrollY;
+  };
+  window.addEventListener("scroll", onScroll, { passive: true });
 
   let playing = true;
   let raf = 0;
   let time = 0;
   let lastAspect = hostAspect(host);
-  const dustColor = new Color();
 
   const tick = () => {
     if (!playing) return;
@@ -246,22 +260,19 @@ export function createDustScene(
       p.x += p.vx + (homeX - p.x) * 0.16;
       p.y += p.vy + (homeY - p.y) * 0.16;
 
+      // Colour is static per particle (set once in createGrid) — only the
+      // position/scale actually animate, so only re-upload those per frame.
       const fade = edgeFade(v);
-      const tint = 0.65 + ((p.col * 7 + p.row * 3) % 10) / 28;
-      dustColor.copy(accentColor).lerp(accentColorDim, 1 - tint);
-      dustColor.multiplyScalar(fade);
-      grid.mesh.setColorAt(i, dustColor);
-
       grid.dummy.position.set(p.x, p.y, 0);
       grid.dummy.scale.setScalar(p.scale * (0.35 + fade * 0.65));
       grid.dummy.updateMatrix();
       grid.mesh.setMatrixAt(i, grid.dummy.matrix);
     }
     grid.mesh.instanceMatrix.needsUpdate = true;
-    if (grid.mesh.instanceColor) grid.mesh.instanceColor.needsUpdate = true;
 
     tickEmbers(embers, host, reduceMotion);
 
+    camera.position.y = reduceMotion ? 0 : -scrollY * PARALLAX_FACTOR;
     renderer.render(scene, camera);
     raf = requestAnimationFrame(tick);
   };
@@ -311,8 +322,25 @@ export function createDustScene(
     }
   };
 
+  // Grid colour is baked in once (see tick()'s comment) — theme toggles are
+  // rare, so recolouring here beats paying for it on every frame forever.
+  const recolorGrid = () => {
+    const color = new Color();
+    for (let i = 0; i < grid.particles.length; i += 1) {
+      const p = grid.particles[i];
+      const v = (p.row + 0.5) / grid.rows;
+      const fade = edgeFade(v);
+      const tint = 0.65 + ((p.col * 7 + p.row * 3) % 10) / 28;
+      color.copy(accentColor).lerp(accentColorDim, 1 - tint);
+      color.multiplyScalar(fade);
+      grid.mesh.setColorAt(i, color);
+    }
+    if (grid.mesh.instanceColor) grid.mesh.instanceColor.needsUpdate = true;
+  };
+
   const onThemeChange = () => {
     syncAccentColors();
+    recolorGrid();
     rebuildGridLines();
   };
   window.addEventListener("themechange", onThemeChange);
@@ -343,8 +371,9 @@ export function createDustScene(
     ro.disconnect();
     io.disconnect();
     window.removeEventListener("themechange", onThemeChange);
-    host.removeEventListener("pointermove", onPointerMove);
-    host.removeEventListener("pointerleave", onPointerLeave);
+    window.removeEventListener("pointermove", onPointerMove);
+    window.removeEventListener("pointerleave", onPointerLeave);
+    window.removeEventListener("scroll", onScroll);
     renderer.dispose();
     grid.geometry.dispose();
     grid.material.dispose();
