@@ -18,25 +18,40 @@
   position: fixed;
   top: 0;
   left: 0;
-  width: 18px;
-  height: 18px;
-  margin: -9px 0 0 -9px;
-  border-radius: 50%;
-  background: radial-gradient(circle, #ff8a5c 0%, #f64709 65%, transparent 100%);
-  box-shadow:
-    0 0 12px 4px rgb(246 71 9 / 0.65),
-    0 0 28px 10px rgb(246 71 9 / 0.3);
+  width: 20px;
+  height: 20px;
+  margin: -10px 0 0 -10px;
   pointer-events: none;
   z-index: 2147483647;
   opacity: 0;
+  filter:
+    drop-shadow(0 0 8px rgb(255 102 0 / 0.85))
+    drop-shadow(0 0 20px rgb(255 102 0 / 0.55));
   transition:
     opacity 0.2s ease,
     width 0.2s ease,
     height 0.2s ease,
     margin 0.2s ease,
-    background 0.2s ease,
-    box-shadow 0.2s ease;
+    filter 0.2s ease;
   will-change: transform;
+}
+
+.custom-cursor::before,
+.custom-cursor::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+}
+
+/* Faux-3D: a darker face offset down-right reads as the hex's extruded side. */
+.custom-cursor::after {
+  background: #e8560a;
+  transform: translate(1.5px, 2px);
+}
+
+.custom-cursor::before {
+  background: radial-gradient(circle at 35% 30%, #ffcf9e 0%, #ff8a2e 45%, #ff6600 100%);
 }
 
 .custom-cursor.is-visible {
@@ -44,13 +59,12 @@
 }
 
 .custom-cursor.is-hover {
-  width: 34px;
-  height: 34px;
-  margin: -17px 0 0 -17px;
-  background: radial-gradient(circle, #ff8a5c 0%, #f64709 65%, transparent 100%);
-  box-shadow:
-    0 0 16px 6px rgb(246 71 9 / 0.7),
-    0 0 36px 14px rgb(246 71 9 / 0.4);
+  width: 38px;
+  height: 38px;
+  margin: -19px 0 0 -19px;
+  filter:
+    drop-shadow(0 0 12px rgb(255 102 0 / 0.9))
+    drop-shadow(0 0 28px rgb(255 102 0 / 0.6));
 }
 
 /* Subtle full-viewport film grain — texture over flat colour fields at
@@ -367,10 +381,15 @@ h3 {
   overflow: hidden;
 }
 
+.hero-media {
+  position: absolute;
+  inset: -12% 0;
+  z-index: 0;
+}
+
 .hero-bg {
   position: absolute;
   inset: 0;
-  z-index: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -398,11 +417,48 @@ h3 {
     );
 }
 
+/* Breathing accent glow behind the copy, echoing the loader's emissive hex. */
+.hero-glow {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background: radial-gradient(
+    circle at 15% 85%,
+    color-mix(in srgb, var(--accent) 45%, transparent),
+    transparent 60%
+  );
+  mix-blend-mode: screen;
+  opacity: 0.2;
+  animation: hero-glow-pulse 6s ease-in-out infinite;
+}
+
+@keyframes hero-glow-pulse {
+  0%,
+  100% {
+    opacity: 0.15;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-glow {
+    animation: none;
+  }
+}
+
 .hero-copy {
   position: relative;
   z-index: 3;
   padding: 0 0 1.5rem;
   max-width: 30rem;
+}
+
+.split-word,
+.split-char {
+  display: inline-block;
 }
 
 .hero-copy h1,
@@ -569,23 +625,13 @@ h3 {
   margin-bottom: 0.35rem;
 }
 
-.job-logo-hex {
-  flex-shrink: 0;
-  width: 3.6rem;
-  height: 4.1rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.3rem;
-  background: var(--panel-bg);
-  clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
-  transition: background-color 0.35s ease;
-}
-
 .job-logo {
-  width: 100%;
-  height: 100%;
+  width: min(10.5rem, 42%);
+  height: auto;
+  max-height: 3.4rem;
   object-fit: contain;
+  object-position: right center;
+  border-radius: 8px;
 }
 
 .inline-logo {
@@ -677,16 +723,6 @@ h3 {
   color: var(--accent);
 }
 
-.timeline ul li {
-  position: relative;
-}
-
-.timeline ul li::before {
-  content: "•";
-  position: absolute;
-  left: -1.1rem;
-  color: var(--accent);
-}
 
 .skills-grid {
   display: grid;
@@ -813,9 +849,9 @@ h3 {
     align-items: flex-start;
   }
 
-  .job-logo-hex {
-    width: 3rem;
-    height: 3.45rem;
+  .job-logo {
+    object-position: left center;
+    max-height: 2.8rem;
   }
 
   .timeline {

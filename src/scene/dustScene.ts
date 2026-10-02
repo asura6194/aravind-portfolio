@@ -73,7 +73,7 @@ const GRID_FADE_DISTANCE = 1.9;
 const EMBER_SPEED_PX = 0.65;
 
 /** Glyph size in pixels at the nearest depth. */
-const EMBER_SIZE_PX = 26;
+const EMBER_SIZE_PX = 16;
 
 /**
  * Farthest Z. Smaller / dimmer, deeper into the scene.
@@ -87,7 +87,7 @@ const EMBER_MIN_DEPTH = 5;
 const EMBER_MAX_DEPTH = 10;
 
 /** How many ember streams are alive at once. Derived from viewport width. */
-const EMBER_COUNT_WIDTH_DIVISOR = 16;
+const EMBER_COUNT_WIDTH_DIVISOR = 11;
 
 const EMBER_TAIL = 15;
 const EMBER_TAIL_GAP_PX = 18;

@@ -11,6 +11,10 @@
     <script>
       (function () {
         document.documentElement.setAttribute("data-theme", "dark");
+        if ("scrollRestoration" in history) {
+          history.scrollRestoration = "manual";
+        }
+        window.scrollTo(0, 0);
       })();
     </script>
     <style>
@@ -87,15 +91,18 @@
 
     <main id="main">
       <section id="hero" class="hero">
-        <img
-          class="hero-bg"
-          src="%BASE_URL%images/portrait.jpeg"
-          alt=""
-          width="1600"
-          height="900"
-          fetchpriority="low"
-        />
+        <div class="hero-media">
+          <img
+            class="hero-bg"
+            src="%BASE_URL%images/portrait.jpeg"
+            alt=""
+            width="1600"
+            height="900"
+            fetchpriority="low"
+          />
+        </div>
         <div class="hero-fade" aria-hidden="true"></div>
+        <div class="hero-glow" aria-hidden="true"></div>
         <div class="hero-copy">
           <h1 data-hero-name></h1>
           <p class="lede" data-hero-title></p>

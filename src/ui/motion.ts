@@ -30,6 +30,20 @@ export function setupMotion(): void {
     });
   });
 
+  const heroMedia = document.querySelector(".hero-media");
+  if (heroMedia) {
+    gsap.to(heroMedia, {
+      yPercent: 10,
+      ease: "none",
+      scrollTrigger: {
+        trigger: ".hero",
+        start: "top top",
+        end: "bottom top",
+        scrub: true,
+      },
+    });
+  }
+
   const timelineFill = document.querySelector(".timeline-fill");
   if (timelineFill) {
     gsap.to(timelineFill, {

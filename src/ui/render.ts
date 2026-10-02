@@ -8,7 +8,7 @@ import {
 } from "../content";
 
 export function renderPage(): void {
-  setText("[data-hero-name]", profile.name);
+  renderSplitText("[data-hero-name]", profile.name);
   setText("[data-hero-title]", profile.title);
   setText("[data-hero-summary]", profile.summary);
   renderAbout();
@@ -39,7 +39,7 @@ export function renderPage(): void {
               <h3>${escapeHtml(job.company)}</h3>
               <p class="job-meta">${escapeHtml(job.location)}</p>
             </div>
-            <span class="job-logo-hex"><img class="job-logo" src="${escapeHtml(assetUrl(job.logo))}" alt="${escapeHtml(job.logoAlt)}" /></span>
+            <img class="job-logo" src="${escapeHtml(assetUrl(job.logo))}" alt="${escapeHtml(job.logoAlt)}" />
           </div>
           ${job.roles
             .map(
@@ -98,6 +98,22 @@ function renderAbout(): void {
   el.innerHTML = profile.about
     .map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`)
     .join("");
+}
+
+function renderSplitText(selector: string, value: string): void {
+  const el = document.querySelector<HTMLElement>(selector);
+  if (!el) return;
+  el.setAttribute("aria-label", value);
+  el.innerHTML = value
+    .split(" ")
+    .map(
+      (word) =>
+        `<span class="split-word">${word
+          .split("")
+          .map((ch) => `<span class="split-char">${escapeHtml(ch)}</span>`)
+          .join("")}</span>`,
+    )
+    .join(" ");
 }
 
 function setText(selector: string, value: string): void {
